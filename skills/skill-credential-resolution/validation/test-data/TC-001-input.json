@@ -1,0 +1,1 @@
+{"credential_ref": "vault://cce/wh_prod_snowflake", "role": "CCE_READER", "grants": ["SELECT"], "ttl_seconds": 3600}

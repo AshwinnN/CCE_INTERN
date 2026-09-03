@@ -1,0 +1,1 @@
+{"source_id":"local_ashwin_drop","adapter":"local-fs","credential_ref":"secret://local-fs/simula-pdf-read","fetch_timeout_ms":15000,"max_objects":1,"object_scope":["local:ashwin-drop"]}

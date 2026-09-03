@@ -1,0 +1,1 @@
+{"source_id":"gmail_ops","adapter":"gmail","credential_ref":"gcp-sm://cce/gmail","fetch_timeout_ms":20000,"max_objects":1000,"object_scope":["label:Contracts"]}

@@ -1,0 +1,13 @@
+{
+  "source_id": "wh_prod_snowflake",
+  "adapter": "snowflake",
+  "credential_ref": "secret://cce/wh_prod_snowflake",
+  "statement_timeout_ms": 30000,
+  "max_rows": 200,
+  "schema_scope": [
+    "ANALYTICS"
+  ],
+  "tables": [
+    "ANALYTICS.DELIVERY_PERFORMANCE"
+  ]
+}

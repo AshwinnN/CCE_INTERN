@@ -1,0 +1,1 @@
+{"credential_ref": "vault://cce/wh_all_privs", "role": "OWNER", "grants": ["ALL_PRIVILEGES"], "ttl_seconds": 3600}

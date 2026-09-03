@@ -1,0 +1,229 @@
+{
+  "skill": "skill-credential-resolution",
+  "test_suite_version": "1.0.0",
+  "test_cases": [
+    {
+      "id": "TC-001",
+      "description": "Issues a Vault-backed lease with a deterministic id and no secret material.",
+      "rule_ids": [
+        "CRD03",
+        "CRD06"
+      ],
+      "input_file": "test-data/TC-001-input.json",
+      "expected": {
+        "lease_id": "lse_wh_prod_snowflake",
+        "credential_ref": "vault://cce/wh_prod_snowflake",
+        "backend": "vault",
+        "role": "CCE_READER",
+        "grants": [
+          "SELECT"
+        ],
+        "grants_write": false,
+        "ttl_seconds": 3600,
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-002",
+      "description": "Issues an AWS Secrets Manager lease with the identical field set as Vault.",
+      "rule_ids": [
+        "CRD02",
+        "CRD07"
+      ],
+      "input_file": "test-data/TC-002-input.json",
+      "expected": {
+        "lease_id": "lse_fs_logistics_pg",
+        "credential_ref": "aws-sm://cce/fs_logistics_pg",
+        "backend": "aws-sm",
+        "role": "ctx_engine_ro",
+        "grants": [
+          "SELECT",
+          "USAGE"
+        ],
+        "grants_write": false,
+        "ttl_seconds": 1800,
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-003",
+      "description": "Issues a GCP Secret Manager lease, third backend through one path.",
+      "rule_ids": [
+        "CRD02",
+        "CRD07"
+      ],
+      "input_file": "test-data/TC-003-input.json",
+      "expected": {
+        "lease_id": "lse_wh_bq_analytics",
+        "credential_ref": "gcp-sm://cce/wh_bq_analytics",
+        "backend": "gcp-sm",
+        "role": "roles/bigquery.dataViewer",
+        "grants": [
+          "SELECT"
+        ],
+        "grants_write": false,
+        "ttl_seconds": 900,
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-004",
+      "description": "Issues an Azure Key Vault lease for an unstructured source.",
+      "rule_ids": [
+        "CRD02",
+        "CRD07"
+      ],
+      "input_file": "test-data/TC-004-input.json",
+      "expected": {
+        "lease_id": "lse_sharepoint_docs",
+        "credential_ref": "azure-kv://cce/sharepoint_docs",
+        "backend": "azure-kv",
+        "role": "Sites.Read.All",
+        "grants": [
+          "LIST",
+          "READ_ONLY"
+        ],
+        "grants_write": false,
+        "ttl_seconds": 600,
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-005",
+      "description": "Rejects a request carrying an inline password beside its credential_ref.",
+      "rule_ids": [
+        "CRD01"
+      ],
+      "input_file": "test-data/TC-005-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "vault://cce/wh_prod_snowflake",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD01"
+      }
+    },
+    {
+      "id": "TC-006",
+      "description": "Rejects a credential_ref whose scheme is not a registered backend.",
+      "rule_ids": [
+        "CRD02"
+      ],
+      "input_file": "test-data/TC-006-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "onepassword://cce/wh_prod",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD02"
+      }
+    },
+    {
+      "id": "TC-007",
+      "description": "Rejects a role holding an INSERT grant.",
+      "rule_ids": [
+        "CRD04"
+      ],
+      "input_file": "test-data/TC-007-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "vault://cce/wh_writable",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD04"
+      }
+    },
+    {
+      "id": "TC-008",
+      "description": "Rejects a request with no ttl_seconds.",
+      "rule_ids": [
+        "CRD05"
+      ],
+      "input_file": "test-data/TC-008-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "vault://cce/wh_no_ttl",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD05"
+      }
+    },
+    {
+      "id": "TC-009",
+      "description": "Rejects a TTL exceeding the backend's own ceiling rather than clamping it.",
+      "rule_ids": [
+        "CRD05"
+      ],
+      "input_file": "test-data/TC-009-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "secret://cce/wh_long_ttl",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD05"
+      }
+    },
+    {
+      "id": "TC-010",
+      "description": "Rejects a caller asking for the secret value to be returned.",
+      "rule_ids": [
+        "CRD03"
+      ],
+      "input_file": "test-data/TC-010-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "vault://cce/wh_prod_snowflake",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD03"
+      }
+    },
+    {
+      "id": "TC-011",
+      "description": "Rejects a role holding ALL_PRIVILEGES.",
+      "rule_ids": [
+        "CRD04"
+      ],
+      "input_file": "test-data/TC-011-input.json",
+      "expected": {
+        "lease_id": null,
+        "credential_ref": "vault://cce/wh_all_privs",
+        "backend": null,
+        "role": null,
+        "grants": null,
+        "grants_write": null,
+        "ttl_seconds": null,
+        "status": "REJECTED",
+        "violated_rule": "CRD04"
+      }
+    }
+  ]
+}

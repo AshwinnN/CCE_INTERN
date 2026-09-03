@@ -1,0 +1,1 @@
+{"source_id":"slack_ops","adapter":"slack","credential_ref":"vault://cce/slack","fetch_timeout_ms":15000,"max_objects":2000,"object_scope":["channel:C123"]}

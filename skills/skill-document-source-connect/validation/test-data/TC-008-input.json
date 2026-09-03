@@ -1,0 +1,1 @@
+{"source_id":"notion_wiki","adapter":"notion","credential_ref":"vault://cce/notion","fetch_timeout_ms":30000,"max_objects":500,"object_scope":["db:xyz"]}

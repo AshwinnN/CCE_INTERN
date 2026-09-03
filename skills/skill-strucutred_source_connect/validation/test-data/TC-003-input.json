@@ -1,0 +1,10 @@
+{
+  "source_id": "lakehouse_eu",
+  "adapter": "databricks",
+  "credential_ref": "secret://cce/lakehouse_eu",
+  "statement_timeout_ms": 45000,
+  "max_rows": 500,
+  "schema_scope": [
+    "gold"
+  ]
+}

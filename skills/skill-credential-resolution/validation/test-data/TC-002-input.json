@@ -1,0 +1,1 @@
+{"credential_ref": "aws-sm://cce/fs_logistics_pg", "role": "ctx_engine_ro", "grants": ["SELECT", "USAGE"], "ttl_seconds": 1800}

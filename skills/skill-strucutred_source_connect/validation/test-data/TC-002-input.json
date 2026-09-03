@@ -1,0 +1,12 @@
+{
+  "source_id": "fs_logistics_pg",
+  "adapter": "postgres",
+  "credential_ref": "secret://cce/fs_logistics_pg",
+  "statement_timeout_ms": 15000,
+  "max_rows": 200,
+  "schema_scope": [
+    "analytics",
+    "ops",
+    "ref"
+  ]
+}

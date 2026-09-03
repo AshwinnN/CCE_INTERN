@@ -1,0 +1,7 @@
+{
+  "adapter": "databricks",
+  "kind": "structured",
+  "dialect": "databricks",
+  "schema_version": "1.0",
+  "capabilities": {"write_probe": true, "statement_timeout": true, "row_cap": true, "schema_scope": true, "row_capp": true}
+}

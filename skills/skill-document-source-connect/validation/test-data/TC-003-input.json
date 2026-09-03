@@ -1,0 +1,1 @@
+{"source_id":"sp_policies","adapter":"sharepoint","credential_ref":"azure-kv://cce/sp","fetch_timeout_ms":25000,"max_objects":300,"object_scope":["site:policies"]}

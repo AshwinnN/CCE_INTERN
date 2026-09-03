@@ -1,0 +1,10 @@
+{
+  "source_id": "wh_bq_analytics",
+  "adapter": "bigquery",
+  "credential_ref": "secret://cce/wh_bq_analytics",
+  "statement_timeout_ms": 20000,
+  "max_rows": 200,
+  "schema_scope": [
+    "analytics_eu"
+  ]
+}

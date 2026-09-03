@@ -1,0 +1,243 @@
+{
+  "skill": "skill-strucutred_source_connect",
+  "test_suite_version": "1.0.0",
+  "test_cases": [
+    {
+      "id": "TC-001",
+      "description": "Opens a Snowflake profile and emits a READY handle with a deterministic id and resolved dialect.",
+      "rule_ids": [
+        "STR02",
+        "STR06",
+        "STR09"
+      ],
+      "input_file": "test-data/TC-001-input.json",
+      "expected": {
+        "handle_id": "hnd_wh_prod_snowflake",
+        "source_id": "wh_prod_snowflake",
+        "adapter": "snowflake",
+        "dialect": "snowflake",
+        "read_only_verified": true,
+        "statement_timeout_ms": 30000,
+        "max_rows": 200,
+        "schema_scope": [
+          "ANALYTICS",
+          "OPS"
+        ],
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-002",
+      "description": "Opens a Postgres profile through the same contract, proving adapter agnosticism with no vendor branch.",
+      "rule_ids": [
+        "STR01",
+        "STR02"
+      ],
+      "input_file": "test-data/TC-002-input.json",
+      "expected": {
+        "handle_id": "hnd_fs_logistics_pg",
+        "source_id": "fs_logistics_pg",
+        "adapter": "postgres",
+        "dialect": "postgres",
+        "read_only_verified": true,
+        "statement_timeout_ms": 15000,
+        "max_rows": 200,
+        "schema_scope": [
+          "analytics",
+          "ops",
+          "ref"
+        ],
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-003",
+      "description": "Opens a Databricks profile and binds its declared timeout and row cap at connect time.",
+      "rule_ids": [
+        "STR01",
+        "STR05"
+      ],
+      "input_file": "test-data/TC-003-input.json",
+      "expected": {
+        "handle_id": "hnd_lakehouse_eu",
+        "source_id": "lakehouse_eu",
+        "adapter": "databricks",
+        "dialect": "databricks",
+        "read_only_verified": true,
+        "statement_timeout_ms": 45000,
+        "max_rows": 500,
+        "schema_scope": [
+          "gold"
+        ],
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-004",
+      "description": "Rejects a profile carrying an inline password, returning the rejection shape with no partial handle fields.",
+      "rule_ids": [
+        "STR04",
+        "STR08"
+      ],
+      "input_file": "test-data/TC-004-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "wh_prod_snowflake",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR04"
+      }
+    },
+    {
+      "id": "TC-005",
+      "description": "Rejects a profile that omits statement_timeout_ms.",
+      "rule_ids": [
+        "STR05"
+      ],
+      "input_file": "test-data/TC-005-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "wh_no_limits",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR05"
+      }
+    },
+    {
+      "id": "TC-006",
+      "description": "Rejects a source whose write probe succeeded, meaning the role is not read-only.",
+      "rule_ids": [
+        "STR03"
+      ],
+      "input_file": "test-data/TC-006-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "wh_writable_role",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR03"
+      }
+    },
+    {
+      "id": "TC-007",
+      "description": "Rejects an adapter that does not resolve in the source registry.",
+      "rule_ids": [
+        "STR01"
+      ],
+      "input_file": "test-data/TC-007-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "mystery_source",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR01"
+      }
+    },
+    {
+      "id": "TC-008",
+      "description": "Rejects a profile declaring a fallback source.",
+      "rule_ids": [
+        "STR07"
+      ],
+      "input_file": "test-data/TC-008-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "wh_prod_snowflake",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR07"
+      }
+    },
+    {
+      "id": "TC-009",
+      "description": "Opens a BigQuery profile, confirming a fourth adapter needs no change to the skill.",
+      "rule_ids": [
+        "STR01",
+        "STR02"
+      ],
+      "input_file": "test-data/TC-009-input.json",
+      "expected": {
+        "handle_id": "hnd_wh_bq_analytics",
+        "source_id": "wh_bq_analytics",
+        "adapter": "bigquery",
+        "dialect": "bigquery",
+        "read_only_verified": true,
+        "statement_timeout_ms": 20000,
+        "max_rows": 200,
+        "schema_scope": [
+          "analytics_eu"
+        ],
+        "status": "READY",
+        "violated_rule": null
+      }
+    },
+    {
+      "id": "TC-010",
+      "description": "Rejects a profile carrying table content, which belongs to discovery not connect.",
+      "rule_ids": [
+        "STR10"
+      ],
+      "input_file": "test-data/TC-010-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "wh_prod_snowflake",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR10"
+      }
+    },
+    {
+      "id": "TC-011",
+      "description": "Rejects an adapter that cannot run a write probe rather than returning READY unverified.",
+      "rule_ids": [
+        "STR03"
+      ],
+      "input_file": "test-data/TC-011-input.json",
+      "expected": {
+        "handle_id": null,
+        "source_id": "legacy_odbc_dw",
+        "adapter": null,
+        "dialect": null,
+        "read_only_verified": null,
+        "statement_timeout_ms": null,
+        "max_rows": null,
+        "schema_scope": null,
+        "status": "REJECTED",
+        "violated_rule": "STR03"
+      }
+    }
+  ]
+}

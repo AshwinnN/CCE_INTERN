@@ -1,0 +1,11 @@
+# Secrets / local environment — never commit real values.
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Local ingestion workflow checkpoint state (common/tools/checkpoint_manager.py)
+.ingestion_checkpoints/

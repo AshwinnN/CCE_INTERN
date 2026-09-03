@@ -1,0 +1,10 @@
+{
+  "source_id": "mystery_source",
+  "adapter": "teradata",
+  "credential_ref": "secret://cce/mystery_source",
+  "statement_timeout_ms": 30000,
+  "max_rows": 200,
+  "schema_scope": [
+    "dw"
+  ]
+}

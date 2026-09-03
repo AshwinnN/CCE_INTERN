@@ -1,0 +1,1 @@
+{"credential_ref": "gcp-sm://cce/wh_bq_analytics", "role": "roles/bigquery.dataViewer", "grants": ["SELECT"], "ttl_seconds": 900}

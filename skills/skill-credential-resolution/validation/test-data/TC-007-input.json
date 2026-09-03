@@ -1,0 +1,1 @@
+{"credential_ref": "vault://cce/wh_writable", "role": "SYSADMIN", "grants": ["SELECT", "INSERT"], "ttl_seconds": 3600}
