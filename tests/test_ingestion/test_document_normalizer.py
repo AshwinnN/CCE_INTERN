@@ -71,6 +71,21 @@ class DocumentNormalizerTests(unittest.TestCase):
         col1_cells = [c for c in result["elements"][0]["cells"] if c["col"] == 1]
         self.assertEqual(col1_cells, [{"row": 0, "col": 1, "text": "1"}])
 
+    def test_columns_metadata_carries_canonical_type(self):
+        schema_card = {
+            "schema": "PUBLIC",
+            "tables": [{"name": "T1",
+                        "columns": [{"name": "AMOUNT", "type": "NUMBER(18,2)", "nullable": True}],
+                        "row_count": None, "sample_row": None}],
+        }
+        result = normalize_to_canonical(schema_card, "structured", source_database="snowflake")
+        columns = result["elements"][0]["metadata"]["columns"]
+        self.assertEqual(columns, [{
+            "name": "AMOUNT", "native_type": "NUMBER(18,2)", "data_type": "NUMERIC",
+            "type_detail": {"source_type": "NUMBER(18,2)", "source_database": "snowflake",
+                             "category": "decimal", "precision": 18, "scale": 2},
+        }])
+
     def test_no_tables_produces_no_elements(self):
         schema_card = {"schema": "EMPTY", "tables": []}
         result = normalize_to_canonical(schema_card, "structured")

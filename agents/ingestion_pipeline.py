@@ -21,6 +21,7 @@ from agents.connector_agent.agent import ConnectorAgent
 from agents.connector_agent.contracts import ConnectorRequest, ConnectorResponse
 from agents.ingestion_workflow import run_ingestion
 from common.tools.checkpoint_manager import IngestionCheckpointStore
+from repository.base import MetadataRepository
 
 
 @dataclass
@@ -58,16 +59,20 @@ class PipelineResult:
 def run_pipeline(request: ConnectorRequest, *,
                   connector_agent: Optional[ConnectorAgent] = None,
                   schema_scope: Optional[List[str]] = None,
+                  schema_database: Optional[str] = None,
                   fetch_unstructured_fn: Optional[Callable[[str, dict, str], bytes]] = None,
                   fetch_structured_fn: Optional[Callable[[str, dict, List[str]], dict]] = None,
                   sdk_emit_fn: Optional[Callable[[dict], dict]] = None,
-                  checkpoint_store: Optional[IngestionCheckpointStore] = None) -> PipelineResult:
+                  checkpoint_store: Optional[IngestionCheckpointStore] = None,
+                  metadata_repository: Optional[MetadataRepository] = None) -> PipelineResult:
     """Connect + observe via ConnectorAgent, then run every resulting
     change event through the ingestion workflow.
 
     `connector_agent` lets a caller reuse one ConnectorAgent (and therefore
     its checkpoint/dedup stores) across repeated poll cycles, the same way
     tests/connector_agent/test_connector_agent.py's ObservationTests do.
+    `schema_database`/`metadata_repository` are passed straight through to
+    run_ingestion() -- see its docstring.
     """
     agent = connector_agent or ConnectorAgent()
     response = agent.handle(request)
@@ -81,10 +86,12 @@ def run_pipeline(request: ConnectorRequest, *,
             event, connection_handle, source_id,
             trace_id=response.trace_id,
             schema_scope=schema_scope,
+            schema_database=schema_database,
             fetch_unstructured_fn=fetch_unstructured_fn,
             fetch_structured_fn=fetch_structured_fn,
             sdk_emit_fn=sdk_emit_fn,
             checkpoint_store=checkpoint_store,
+            metadata_repository=metadata_repository,
         )
         outcomes.append(IngestionOutcome(
             object_id=event["object"]["object_id"],

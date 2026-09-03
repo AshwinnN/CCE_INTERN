@@ -12,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from typing import Optional
 from unittest import mock
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,11 +20,81 @@ sys.path.insert(0, REPO)
 
 from agents.ingestion_workflow import (  # noqa: E402
     route_by_source, fetch_unstructured_node, fetch_structured_node,
-    parse_document_node, normalize_document_node, classify_for_dlp_node,
-    redact_if_needed_node, emit_to_sdk_node, checkpoint_node,
+    persist_structured_metadata_node, parse_document_node, normalize_document_node,
+    classify_for_dlp_node, redact_if_needed_node, emit_to_sdk_node, checkpoint_node,
     build_ingestion_workflow, run_ingestion,
 )
 from common.tools.checkpoint_manager import IngestionCheckpointStore  # noqa: E402
+from repository.base import MetadataRepository, SchemaSnapshot  # noqa: E402
+
+
+class FakeMetadataRepository(MetadataRepository):
+    """In-memory MetadataRepository -- no live Postgres. Records every
+    save_table/save_column call so tests can assert on what the node
+    persisted."""
+
+    def __init__(self, raise_on: Optional[str] = None):
+        self.tables = []
+        self.columns = []
+        self.snapshots = []
+        self.closed = False
+        self._raise_on = raise_on
+
+    def _maybe_raise(self, method):
+        if self._raise_on == method:
+            raise RuntimeError("simulated repository failure in %s" % method)
+
+    def ensure_source(self, adapter, account_id, display_name=None):
+        self._maybe_raise("ensure_source")
+        return "source-%s-%s" % (adapter, account_id)
+
+    def ensure_namespace(self, source_id, namespace_name, namespace_type):
+        self._maybe_raise("ensure_namespace")
+        return "namespace-%s-%s" % (source_id, namespace_name)
+
+    def ensure_schema(self, namespace_id, schema_name):
+        self._maybe_raise("ensure_schema")
+        return "schema-%s-%s" % (namespace_id, schema_name)
+
+    def save_snapshot(self, snapshot: SchemaSnapshot):
+        self._maybe_raise("save_snapshot")
+        self.snapshots.append(snapshot)
+        return snapshot.snapshot_id
+
+    def save_table(self, table_record):
+        self._maybe_raise("save_table")
+        table_id = "table-%s" % table_record["table_name"]
+        self.tables.append(dict(table_record, table_id=table_id))
+        return table_id
+
+    def save_column(self, column_record):
+        self._maybe_raise("save_column")
+        self.columns.append(dict(column_record))
+        return "column-%s-%s" % (column_record["table_id"], column_record["column_name"])
+
+    def save_constraint(self, constraint_record):
+        raise NotImplementedError
+
+    def save_relationship(self, relationship_record):
+        raise NotImplementedError
+
+    def list_tables(self, snapshot_id):
+        return [t for t in self.tables if t["snapshot_id"] == snapshot_id]
+
+    def list_columns(self, snapshot_id, table_id=None):
+        return [c for c in self.columns if c["snapshot_id"] == snapshot_id]
+
+    def query_by_canonical_type(self, data_type, source_id=None):
+        return [c for c in self.columns if c["data_type"] == data_type]
+
+    def latest_snapshot_id(self, schema_id):
+        return self.snapshots[-1].snapshot_id if self.snapshots else None
+
+    def detect_changes(self, snapshot_1, snapshot_2):
+        return []
+
+    def close(self):
+        self.closed = True
 
 
 def make_event(object_id="notes.txt", adapter="azure-blob", kind="unstructured",
@@ -44,10 +115,11 @@ def base_state(**overrides):
     state = {
         "source_id": "src-1", "tenant_id": "t1", "kind": "unstructured", "adapter": "azure-blob",
         "connection_handle": {"handle_id": "h1"}, "event": make_event(), "schema_scope": [],
-        "trace_id": "trc_test",
+        "schema_database": None, "trace_id": "trc_test",
         "_fetch_unstructured": None, "_fetch_structured": None, "_sdk_emit": None,
-        "_checkpoint_store": None,
+        "_checkpoint_store": None, "_metadata_repository": None,
         "raw_content": None, "parsed_doc": None, "normalized_doc": None,
+        "metadata_snapshot_id": None,
         "dlp_verdict": None, "redacted_doc": None,
         "errors": [], "warnings": [], "ready_for_sdk": False, "sdk_response": None,
         "ingestion_checkpoint_id": None,
@@ -129,6 +201,69 @@ class FetchStructuredNodeTests(unittest.TestCase):
         self.assertEqual(result["raw_content"], {"schema": "S", "tables": []})
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], "snowflake")
+
+
+class PersistStructuredMetadataNodeTests(unittest.TestCase):
+
+    def _card(self):
+        return {"schema": "PUBLIC",
+                "tables": [{"name": "SALES",
+                            "columns": [{"name": "AMOUNT", "type": "NUMBER(18,2)", "nullable": True}],
+                            "row_count": 10, "sample_row": None}]}
+
+    def test_unstructured_kind_is_a_no_op(self):
+        repo = FakeMetadataRepository()
+        state = base_state(kind="unstructured", _metadata_repository=repo)
+        result = persist_structured_metadata_node(state)
+        self.assertIsNone(result["metadata_snapshot_id"])
+        self.assertEqual(repo.tables, [])
+
+    def test_no_raw_content_is_a_no_op(self):
+        repo = FakeMetadataRepository()
+        state = base_state(kind="structured", raw_content=None, _metadata_repository=repo)
+        persist_structured_metadata_node(state)
+        self.assertEqual(repo.tables, [])
+
+    def test_no_repository_configured_is_a_warning_not_an_error(self):
+        os.environ.pop("CCE_METADATA_DATABASE_URL", None)
+        state = base_state(kind="structured", raw_content=self._card(), _metadata_repository=None)
+        result = persist_structured_metadata_node(state)
+        self.assertEqual(result["errors"], [])
+        self.assertIn("CCE_METADATA_DATABASE_URL not configured", result["warnings"][0])
+        self.assertIsNone(result["metadata_snapshot_id"])
+
+    def test_injected_repository_receives_canonicalized_columns(self):
+        repo = FakeMetadataRepository()
+        state = base_state(kind="structured", adapter="snowflake", raw_content=self._card(),
+                            _metadata_repository=repo)
+        result = persist_structured_metadata_node(state)
+        self.assertEqual(result["errors"], [])
+        self.assertEqual(result["warnings"], [])
+        self.assertIsNotNone(result["metadata_snapshot_id"])
+        self.assertEqual(len(repo.tables), 1)
+        self.assertEqual(repo.tables[0]["table_name"], "SALES")
+        self.assertEqual(len(repo.columns), 1)
+        column = repo.columns[0]
+        self.assertEqual(column["column_name"], "AMOUNT")
+        self.assertEqual(column["data_type"], "NUMERIC")
+        self.assertEqual(column["numeric_precision"], 18)
+        self.assertEqual(column["numeric_scale"], 2)
+        self.assertEqual(column["native_data_type"], "NUMBER(18,2)")
+
+    def test_caller_supplied_repository_is_never_closed(self):
+        repo = FakeMetadataRepository()
+        state = base_state(kind="structured", raw_content=self._card(), _metadata_repository=repo)
+        persist_structured_metadata_node(state)
+        self.assertFalse(repo.closed)
+
+    def test_repository_failure_is_recorded_as_a_warning_not_an_error(self):
+        repo = FakeMetadataRepository(raise_on="save_column")
+        state = base_state(kind="structured", raw_content=self._card(), _metadata_repository=repo)
+        result = persist_structured_metadata_node(state)
+        self.assertEqual(result["errors"], [])
+        self.assertIn("persist_structured_metadata", result["warnings"][0])
+        self.assertIn("simulated repository failure", result["warnings"][0])
+        self.assertIsNone(result["metadata_snapshot_id"])
 
 
 class ParseDocumentNodeTests(unittest.TestCase):

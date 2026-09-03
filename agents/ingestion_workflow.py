@@ -27,9 +27,13 @@ thin, separate orchestrator that chains ConnectorAgent.handle() into
 run_ingestion() per event, so this boundary stays intact.
 """
 import copy
+import hashlib
+import json
 import logging
 import os
 import tempfile
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
 from langgraph.graph import StateGraph, END
@@ -39,6 +43,8 @@ from common.tools.dlp_classifier import classify_text, get_dlp_confidence_thresh
 from common.tools.document_normalizer import normalize_to_canonical
 from common.tools.source_connector import fetch_structured as _fetch_structured_card
 from common.tools.source_connector import fetch_unstructured as _fetch_unstructured_bytes
+from connectors.canonical_types import canonicalize_type
+from repository.base import MetadataRepository, SchemaSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +60,9 @@ class IngestionState(TypedDict, total=False):
     connection_handle: dict
     event: dict                    # full SourceChangeEvent-shaped dict
     schema_scope: List[str]
+    schema_database: Optional[str]  # structured lane only -- adapter's database/catalog name
+                                     # (not present in SourceChangeEvent; see
+                                     # persist_structured_metadata_node's _resolve_schema_database())
     trace_id: str
 
     # injected dependencies (test/caller-supplied; production defaults are
@@ -64,11 +73,13 @@ class IngestionState(TypedDict, total=False):
     _fetch_structured: Optional[Callable[[str, dict, List[str]], dict]]
     _sdk_emit: Optional[Callable[[dict], dict]]
     _checkpoint_store: Optional[IngestionCheckpointStore]
+    _metadata_repository: Optional[MetadataRepository]
 
     # --- intermediate ---
     raw_content: Optional[Any]         # bytes (unstructured) | dict schema card (structured)
     parsed_doc: Optional[dict]         # CanonicalDocument-shaped, unstructured only
     normalized_doc: Optional[dict]     # CanonicalDocument-shaped, both lanes
+    metadata_snapshot_id: Optional[str]  # structured lane only -- set by persist_structured_metadata_node
 
     dlp_verdict: Optional[dict]
     redacted_doc: Optional[dict]
@@ -140,6 +151,118 @@ def fetch_structured_node(state: IngestionState) -> IngestionState:
     return state
 
 
+def _default_metadata_repository() -> Optional[MetadataRepository]:
+    """Production default: PostgreSQLMetadataRepository from
+    CCE_METADATA_DATABASE_URL. None (dry run) if unset -- matches
+    _default_sdk_emit's "endpoint not configured -> dry run" pattern above:
+    a metadata-repository outage or absence must never block the SDK emit,
+    which stays this pipeline's critical path (see
+    persist_structured_metadata_node's docstring)."""
+    dsn = os.environ.get("CCE_METADATA_DATABASE_URL")
+    if not dsn:
+        return None
+    from repository.postgresql_metadata_repository import PostgreSQLMetadataRepository
+    return PostgreSQLMetadataRepository(dsn)
+
+
+def _resolve_schema_database(adapter: str, explicit: Optional[str]) -> Optional[str]:
+    """The adapter's database/catalog name -- not present anywhere in
+    SourceChangeEvent (see agents/connector_agent/contracts.py), so an
+    explicit override (run_ingestion(schema_database=...)) always wins.
+    Falls back to env for adapter == "snowflake" only, the same
+    single-adapter special case _default_fetch_structured makes above.
+    An incomplete CCE_SNOWFLAKE_* env (e.g. a test/dev environment with a
+    repository configured but no live Snowflake account) degrades to None
+    (caller substitutes "default") rather than aborting the whole persist
+    attempt -- getting the namespace name wrong is recoverable, losing the
+    entire snapshot over it is not."""
+    if explicit:
+        return explicit
+    if adapter == "snowflake":
+        try:
+            from connectors.snowflake.config import build_config_from_env
+            return build_config_from_env().database
+        except KeyError:
+            return None
+    return None
+
+
+def persist_structured_metadata_node(state: IngestionState) -> IngestionState:
+    """Structured lane only: canonicalize every column's native type
+    (connectors/canonical_types.py -- "Issue 5: Canonical Types") and
+    persist a new immutable snapshot (source -> namespace -> schema ->
+    table -> column) to the metadata repository (schema/*.sql). No-op
+    passthrough for the unstructured lane, same pattern as
+    parse_document_node's `if state["kind"] != "structured"` check.
+
+    A repository failure -- including "no CCE_METADATA_DATABASE_URL
+    configured" -- becomes a warning, never an error: this step is
+    additive to the pipeline's critical path (fetch -> normalize -> emit
+    to CCE_SDK_ENDPOINT), matching this file's existing
+    classify/redact/checkpoint "never blocks" discipline.
+    """
+    if state["kind"] != "structured":
+        return state
+    schema_card = state.get("raw_content")
+    if not schema_card:
+        return state  # fetch_structured already recorded why
+
+    repo = state.get("_metadata_repository")
+    owns_repo = repo is None
+    try:
+        if repo is None:
+            repo = _default_metadata_repository()
+        if repo is None:
+            state["warnings"] = state["warnings"] + [
+                "persist_structured_metadata: CCE_METADATA_DATABASE_URL not configured, dry-run only"]
+            return state
+
+        adapter = state["adapter"]
+        database_name = _resolve_schema_database(adapter, state.get("schema_database")) or "default"
+        source_id = repo.ensure_source(adapter, state["source_id"])
+        namespace_type = "catalog" if adapter == "snowflake" else "database"
+        namespace_id = repo.ensure_namespace(source_id, database_name, namespace_type)
+        schema_name = schema_card.get("schema") or "default"
+        schema_id = repo.ensure_schema(namespace_id, schema_name)
+
+        tables = schema_card.get("tables", [])
+        schema_hash = hashlib.sha256(
+            json.dumps(tables, sort_keys=True, default=str).encode()).hexdigest()
+        snapshot_id = str(uuid.uuid4())
+        repo.save_snapshot(SchemaSnapshot(
+            snapshot_id=snapshot_id, source_id=source_id, schema_id=schema_id,
+            captured_at=datetime.now(timezone.utc), schema_hash=schema_hash, status="SUCCESS",
+            table_count=len(tables), column_count=sum(len(t.get("columns", [])) for t in tables),
+        ))
+
+        for table in tables:
+            table_id = repo.save_table({
+                "snapshot_id": snapshot_id, "schema_id": schema_id,
+                "table_name": table.get("name"), "table_type": "TABLE",
+                "row_count": table.get("row_count"),
+            })
+            for ordinal, col in enumerate(table.get("columns", []), start=1):
+                data_type, type_detail = canonicalize_type(col.get("type") or "", adapter)
+                repo.save_column({
+                    "snapshot_id": snapshot_id, "table_id": table_id,
+                    "column_name": col.get("name"), "ordinal_position": ordinal,
+                    "data_type": data_type, "type_detail": type_detail,
+                    "native_data_type": col.get("type"),
+                    "is_nullable": col.get("nullable", True),
+                    "numeric_precision": type_detail.get("precision"),
+                    "numeric_scale": type_detail.get("scale"),
+                    "character_maximum_length": type_detail.get("length"),
+                })
+
+        state["metadata_snapshot_id"] = snapshot_id
+    except Exception as e:
+        state["warnings"] = state["warnings"] + ["persist_structured_metadata: %s" % e]
+    finally:
+        if owns_repo and repo is not None:
+            repo.close()
+    return state
+
+
 def parse_document_node(state: IngestionState) -> IngestionState:
     """Unstructured only: detect MIME, dispatch to a parser, parse raw bytes
     into a CanonicalDocument. No-op (state unchanged) for the structured
@@ -204,7 +327,8 @@ def normalize_document_node(state: IngestionState) -> IngestionState:
     try:
         source_payload = state.get("parsed_doc") if state["kind"] == "unstructured" \
             else state.get("raw_content")
-        state["normalized_doc"] = normalize_to_canonical(source_payload, state["kind"])
+        state["normalized_doc"] = normalize_to_canonical(
+            source_payload, state["kind"], source_database=state["adapter"])
     except Exception as e:
         state["errors"] = state["errors"] + ["normalize_document: %s" % e]
     return state
@@ -353,6 +477,7 @@ def checkpoint_node(state: IngestionState) -> IngestionState:
             "errors": state["errors"],
             "warnings": state["warnings"],
             "ready_for_sdk": state.get("ready_for_sdk", False),
+            "metadata_snapshot_id": state.get("metadata_snapshot_id"),
             "trace_id": state["trace_id"],
         }
         state["ingestion_checkpoint_id"] = store.save(state["source_id"], object_id, checkpoint_data)
@@ -369,6 +494,7 @@ def build_ingestion_workflow():
     workflow.add_node("route", route_by_source)
     workflow.add_node("fetch_unstructured", fetch_unstructured_node)
     workflow.add_node("fetch_structured", fetch_structured_node)
+    workflow.add_node("persist_structured_metadata", persist_structured_metadata_node)
     workflow.add_node("parse", parse_document_node)
     workflow.add_node("normalize", normalize_document_node)
     workflow.add_node("classify_dlp", classify_for_dlp_node)
@@ -389,7 +515,8 @@ def build_ingestion_workflow():
 
     workflow.add_edge("fetch_unstructured", "parse")
     workflow.add_edge("parse", "normalize")
-    workflow.add_edge("fetch_structured", "normalize")
+    workflow.add_edge("fetch_structured", "persist_structured_metadata")
+    workflow.add_edge("persist_structured_metadata", "normalize")
     workflow.add_edge("normalize", "classify_dlp")
     workflow.add_edge("classify_dlp", "redact")
     workflow.add_edge("redact", "emit")
@@ -404,10 +531,12 @@ def build_ingestion_workflow():
 def run_ingestion(event: Dict[str, Any], connection_handle: dict, source_id: str, *,
                    trace_id: Optional[str] = None,
                    schema_scope: Optional[List[str]] = None,
+                   schema_database: Optional[str] = None,
                    fetch_unstructured_fn: Optional[Callable[[str, dict, str], bytes]] = None,
                    fetch_structured_fn: Optional[Callable[[str, dict, List[str]], dict]] = None,
                    sdk_emit_fn: Optional[Callable[[dict], dict]] = None,
-                   checkpoint_store: Optional[IngestionCheckpointStore] = None):
+                   checkpoint_store: Optional[IngestionCheckpointStore] = None,
+                   metadata_repository: Optional[MetadataRepository] = None):
     """Entry point: given one SourceChangeEvent-shaped dict (as produced by
     agents/connector_agent/change_capture.py's observers), run it through
     the full ingestion workflow.
@@ -416,6 +545,14 @@ def run_ingestion(event: Dict[str, Any], connection_handle: dict, source_id: str
     arguments -- the event is the single source of truth for what it is, and
     the Connector Agent always sets both fields (see change_capture.py's
     _event() helpers).
+
+    schema_database (structured lane only) is the adapter's database/catalog
+    name for persist_structured_metadata_node -- see
+    _resolve_schema_database()'s docstring for why it can't be read off the
+    event. metadata_repository lets a caller reuse one repository (and its
+    connection pool) across repeated ingestion runs, the same way
+    checkpoint_store is reused; a caller-supplied repository is never closed
+    by this workflow (see persist_structured_metadata_node's `owns_repo`).
 
     Returns: (success: bool, final_state: IngestionState) -- success is
     "no node recorded an error", not "nothing recorded a warning".
@@ -430,14 +567,17 @@ def run_ingestion(event: Dict[str, Any], connection_handle: dict, source_id: str
         "connection_handle": connection_handle,
         "event": event,
         "schema_scope": schema_scope or [],
+        "schema_database": schema_database,
         "trace_id": trace_id or event.get("trace_id") or "",
         "_fetch_unstructured": fetch_unstructured_fn,
         "_fetch_structured": fetch_structured_fn,
         "_sdk_emit": sdk_emit_fn,
         "_checkpoint_store": checkpoint_store,
+        "_metadata_repository": metadata_repository,
         "raw_content": None,
         "parsed_doc": None,
         "normalized_doc": None,
+        "metadata_snapshot_id": None,
         "dlp_verdict": None,
         "redacted_doc": None,
         "errors": [],
