@@ -28,6 +28,10 @@ from common.tools.credential_loader import load_snowflake_keypair_credential
 PROBE_TABLE = "__CCE_WRITE_PROBE__"
 
 
+def _quote_identifier(value: str) -> str:
+    return '"%s"' % value.replace('"', '""')
+
+
 def _default_driver_connect(**kwargs):
     import snowflake.connector
     return snowflake.connector.connect(**kwargs)
@@ -98,32 +102,64 @@ class SnowflakeConnector(StructuredConnector):
         finally:
             cursor.close()
 
+    def get_information_schema_card(self, schema: str, max_tables: Optional[int] = None) -> Dict[str, Any]:
+        if not self._connection:
+            raise NotConnectedError("get_information_schema_card called before connect()")
+
+        cursor = self._connection.cursor()
+        try:
+            database_prefix = ""
+            params = [schema.upper()]
+            if self.config.database:
+                database_prefix = "%s." % _quote_identifier(self.config.database)
+                params.insert(0, self.config.database.upper())
+                catalog_filter = "table_catalog = %s AND "
+            else:
+                catalog_filter = ""
+
+            cursor.execute(
+                """
+                SELECT table_catalog, table_schema, table_name, column_name, data_type, is_nullable
+                FROM %sinformation_schema.columns
+                WHERE %stable_schema = %%s
+                ORDER BY table_name, ordinal_position
+                """ % (database_prefix, catalog_filter),
+                params,
+            )
+            tables: Dict[str, Dict[str, Any]] = {}
+            for row in cursor.fetchall():
+                if len(row) == 6:
+                    _, table_schema, table_name, column_name, data_type, is_nullable = row
+                else:
+                    table_schema = schema
+                    table_name, column_name, data_type, is_nullable = row
+                if table_name not in tables:
+                    if max_tables is not None and len(tables) >= max_tables:
+                        continue
+                    tables[table_name] = {
+                        "schema": table_schema,
+                        "name": table_name,
+                        "columns": [],
+                        "row_count": None,
+                        "sample_row": None,
+                    }
+                tables[table_name]["columns"].append({
+                    "name": column_name, "type": data_type, "nullable": is_nullable == "YES",
+                })
+            return {"schema": schema, "tables": list(tables.values())}
+        finally:
+            cursor.close()
+
     def get_schema_card(self, schema: str, max_tables: Optional[int] = None) -> Dict[str, Any]:
         if not self._connection:
             raise NotConnectedError("get_schema_card called before connect()")
         from snowflake.connector.errors import DatabaseError, ProgrammingError
 
+        card = self.get_information_schema_card(schema, max_tables=max_tables)
         cursor = self._connection.cursor()
-        cursor.execute(
-            """
-            SELECT table_name, column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE table_schema = %s
-            ORDER BY table_name, ordinal_position
-            """,
-            (schema.upper(),),
-        )
-        tables: Dict[str, Dict[str, Any]] = {}
-        for table_name, column_name, data_type, is_nullable in cursor.fetchall():
-            if table_name not in tables:
-                if max_tables is not None and len(tables) >= max_tables:
-                    continue
-                tables[table_name] = {"name": table_name, "columns": [], "row_count": None, "sample_row": None}
-            tables[table_name]["columns"].append({
-                "name": column_name, "type": data_type, "nullable": is_nullable == "YES",
-            })
 
-        for table_name, table in tables.items():
+        for table in card["tables"]:
+            table_name = table["name"]
             try:
                 cursor.execute('SELECT COUNT(*) FROM "%s"."%s"' % (schema, table_name))
                 row = cursor.fetchone()
@@ -141,7 +177,7 @@ class SnowflakeConnector(StructuredConnector):
                 table["sample_row"] = None  # no read grant on this table -- keep columns, skip sample
 
         cursor.close()
-        return {"schema": schema, "tables": list(tables.values())}
+        return card
 
     def execute_query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         if not self._connection:

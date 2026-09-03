@@ -6,6 +6,10 @@
 __pycache__/
 *.pyc
 .venv/
+.tools/
 
 # Local ingestion workflow checkpoint state (common/tools/checkpoint_manager.py)
 .ingestion_checkpoints/
+
+_DELETED_*
+_temp**

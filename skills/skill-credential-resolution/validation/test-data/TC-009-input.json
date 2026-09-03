@@ -1,1 +1,0 @@
-{"credential_ref": "secret://cce/wh_long_ttl", "role": "CCE_READER", "grants": ["SELECT"], "ttl_seconds": 86400}

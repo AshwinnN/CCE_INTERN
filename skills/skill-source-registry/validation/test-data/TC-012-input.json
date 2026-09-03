@@ -1,8 +1,0 @@
-{
-  "adapter": "snowflake-v2",
-  "kind": "structured",
-  "dialect": "snowflake",
-  "schema_version": "1.1",
-  "replaces": "snowflake",
-  "capabilities": {"write_probe": true, "statement_timeout": true, "row_cap": true, "schema_scope": true}
-}

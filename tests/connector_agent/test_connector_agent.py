@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Connector Agent orchestration tests. Uses the REAL skill functions (no
-mocking of Skill logic) -- only the live-driver stand-ins (object/catalog
-listers, and the structured connector factory) are test doubles, the same
-convention every skill in this repo already uses via its own `_`-prefixed
-fixture fields.
+"""Connector Agent orchestration tests for deterministic code paths.
 
 The structured lane's connect step (orchestrator.connect_structured()) is
 no longer a Skill call -- it's a real, deterministic connectors/ tool that
@@ -74,7 +70,7 @@ class RoutingTests(unittest.TestCase):
         self.assertNotIn("skill-strucutred_source_connect", skills_called)  # no longer exists in any trace
         self.assertNotIn("skill-document-source-connect", skills_called)
 
-    def test_unstructured_registry_kind_routes_to_document_connect_skill(self):
+    def test_unstructured_registry_kind_routes_to_code_source_connect(self):
         agent = make_agent()
         resp = agent.handle(make_request(
             source_adapter="google-drive",
@@ -84,7 +80,7 @@ class RoutingTests(unittest.TestCase):
         self.assertEqual(resp.status, "connected")
         self.assertEqual(resp.source["kind"], "unstructured")
         skills_called = [t.skill for t in resp.skill_trace]
-        self.assertIn("skill-document-source-connect", skills_called)
+        self.assertIn("code.source-connect", skills_called)
         self.assertFalse(any(s.startswith("connectors.") for s in skills_called))
 
     def test_routing_is_kind_based_two_different_adapters_same_kind_same_path(self):
@@ -111,7 +107,7 @@ class FailClosedTests(unittest.TestCase):
         self.assertEqual(resp.error["code"], "CREDENTIAL_REF_MISSING")
         skills_called = [t.skill for t in resp.skill_trace]
         self.assertFalse(any(s.startswith("connectors.") for s in skills_called))
-        self.assertNotIn("skill-document-source-connect", skills_called)
+        self.assertNotIn("code.source-connect", skills_called)
 
     def test_unknown_adapter_fails_before_registry_skill_is_even_called(self):
         agent = make_agent()
@@ -231,7 +227,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_checkpoint_is_not_advanced_when_observation_skill_rejects(self):
         # object_lister returns malformed objects (missing 'state') -> the
-        # real skill-document-sync rejects with DSY05.
+        # deterministic document sync rejects with DSY05.
         def bad_object_lister(cursor):
             return {"objects": [{"object_id": "doc-1", "revision": "r1", "scope": "folder:x"}],
                     "cursor_next": "cur-1"}

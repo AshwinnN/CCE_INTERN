@@ -1,1 +1,0 @@
-{"source_id":"legacy_share","adapter":"legacy-ftp","credential_ref":"vault://cce/ftp","fetch_timeout_ms":30000,"max_objects":500,"object_scope":["/exports"]}

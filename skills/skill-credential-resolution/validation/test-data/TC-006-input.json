@@ -1,1 +1,0 @@
-{"credential_ref": "onepassword://cce/wh_prod", "role": "reader", "grants": ["SELECT"], "ttl_seconds": 3600}

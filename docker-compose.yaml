@@ -1,19 +1,20 @@
 services:
   postgres:
-    image: postgres:14-alpine
+    container_name: cce-demo-postgres
+    image: postgres:16
     environment:
       POSTGRES_USER: cce_admin
       POSTGRES_PASSWORD: cce_password
       POSTGRES_DB: cce_metadata
     ports:
-      - "5432:5432"
+      - "5434:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - cce_demo_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cce_admin -d cce_metadata"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 3
 
 volumes:
-  postgres_data:
+  cce_demo_postgres_data:

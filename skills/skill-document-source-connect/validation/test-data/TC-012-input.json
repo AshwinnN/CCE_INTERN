@@ -1,1 +1,0 @@
-{"source_id":"open_bucket","adapter":"public-bucket","credential_ref":"aws-sm://cce/bucket","fetch_timeout_ms":30000,"max_objects":500,"object_scope":["s3://docs"]}

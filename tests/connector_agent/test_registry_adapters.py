@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for common/known_adapters.py and the registry_to_*_connect
-transforms, exercised together with the real skill-source-registry
-validator (not a mock of it)."""
+"""Tests for known adapters and deterministic registry validation."""
 import copy
 import os
 import sys
@@ -13,16 +11,17 @@ sys.path.insert(0, REPO)
 from common.known_adapters import StubAdapterRegistryProvider  # noqa: E402
 from common.registry_to_structured_connect import to_structured_connect_registry  # noqa: E402
 from common.registry_to_document_connect import validate_document_connect_registry  # noqa: E402
-from common.skill_loader import load_skill_function  # noqa: E402
+from agents.connector_agent import orchestrator  # noqa: E402
 
 
 class KnownAdaptersTests(unittest.TestCase):
 
     def setUp(self):
         self.provider = StubAdapterRegistryProvider()
-        self.registry_validate = load_skill_function(
-            "skill-source-registry", "validate_registry_entry.py", "validate"
-        )
+        self.skill_trace = []
+
+    def registry_validate(self, entry):
+        return orchestrator.validate_registry_entry(entry, "trc_test", self.skill_trace)
 
     def test_unknown_adapter_returns_none(self):
         self.assertIsNone(self.provider.get("does-not-exist"))
@@ -41,7 +40,7 @@ class KnownAdaptersTests(unittest.TestCase):
             self.assertEqual(descriptor["kind"], "structured")
 
     def test_every_seeded_unstructured_adapter_passes_real_registry_validation(self):
-        for adapter in ("google-drive", "gmail", "sharepoint", "slack", "confluence", "local-fs"):
+        for adapter in ("google-drive", "gmail", "sharepoint", "slack", "confluence", "local-fs", "azure-blob"):
             entry = self.provider.get(adapter)
             descriptor = self.registry_validate(entry)
             self.assertEqual(descriptor["status"], "READY", "%s: %s" % (adapter, descriptor))

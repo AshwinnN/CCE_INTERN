@@ -1,1 +1,0 @@
-{"source_id":"gdrive_nolimit","adapter":"google-drive","credential_ref":"vault://cce/gdrive","fetch_timeout_ms":30000,"object_scope":["folder:0ABCxyz"]}

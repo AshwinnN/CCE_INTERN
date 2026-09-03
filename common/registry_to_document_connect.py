@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
-"""Orchestration-only validation for the unstructured lane's registry entry.
+"""Deterministic validation for unstructured source descriptors.
 
-Unlike skill-strucutred_source_connect, skill-document-source-connect's
-script (validate_document_profile.py) takes NO external registry parameter
-at all -- its adapter table is fully internal, with no `--registry`-style
-override point. So there is no DTO shape to reshape *into*; modifying that
-skill's wrapper to accept one would violate "do not modify a Skill wrapper
-merely to accept another Skill's DTO shape."
-
-What this module does instead: the same fail-closed validation
-registry_to_structured_connect.py performs (schema version, status,
-deprecated, violated_rule, adapter, capabilities), scoped to kind ==
-"unstructured", so the Agent can reject an invalid/inactive/deprecated
-unstructured registry entry *before* calling the connect skill -- exactly
-the same gate the structured lane gets, just without a reshape step at the
-end, because none is needed.
+This mirrors registry_to_structured_connect.py's fail-closed checks, scoped
+to kind == "unstructured". No reshape is needed because unstructured source
+connection only needs the validated capability set.
 
 Zero dependency, deterministic, no I/O.
 """

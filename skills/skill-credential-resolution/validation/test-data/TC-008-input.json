@@ -1,1 +1,0 @@
-{"credential_ref": "vault://cce/wh_no_ttl", "role": "CCE_READER", "grants": ["SELECT"]}

@@ -25,8 +25,8 @@ from connectors.snowflake.config import build_config_from_env  # noqa: E402
 
 
 @unittest.skipUnless(
-    os.environ.get("CCE_SNOWFLAKE_ENABLED", "false").lower() == "true",
-    "CCE_SNOWFLAKE_ENABLED is not 'true' -- skipping live Snowflake test",
+    os.environ.get("CCE_SNOWFLAKE_LIVE_TESTS", "false").lower() == "true",
+    "CCE_SNOWFLAKE_LIVE_TESTS is not 'true' -- skipping live Snowflake test",
 )
 class SnowflakeLiveIntegrationTests(unittest.TestCase):
 

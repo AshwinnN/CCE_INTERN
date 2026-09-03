@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic structured-source connectors -- replaces
-skill-strucutred_source_connect's simulated write-probe with a real one.
-See structured_connector_architecture.md and
-structured_connector_quick_reference.md for the design.
+"""Deterministic source connectors.
 
 One interface (connectors.base.StructuredConnector), many implementations
 (connectors.snowflake.SnowflakeConnector today). Callers go through

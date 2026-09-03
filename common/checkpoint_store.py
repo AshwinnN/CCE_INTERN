@@ -1,16 +1,9 @@
 #!/usr/bin/env python3
-"""MVP STUB -- replace with persistent checkpoint storage.
+"""MVP checkpoint and dedup storage.
 
-No skill in this repo persists a generic opaque cursor/checkpoint across
-observation cycles. skill-source-metadata-store only stores versioned schema
-cards (keyed by source_id + card_version, MDS01) -- a different, narrower
-contract than "remember the last cursor/watermark for this source_id",
-and repurposing it for that would be a contract misuse, not a reuse.
-
-This is explicitly Agent-owned state, not a Skill: it has no Core Rules, no
-SKILL.md, no rule IDs, because it isn't validating anything -- it's just
-remembering a value between calls, the same way any orchestrator needs
-somewhere to keep its own run state.
+This is Agent-owned state: it remembers opaque observation cursors and
+idempotency keys between calls. Production deployments should replace the
+in-memory classes with durable implementations behind the same interfaces.
 """
 
 

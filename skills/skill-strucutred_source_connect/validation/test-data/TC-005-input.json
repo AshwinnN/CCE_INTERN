@@ -1,9 +1,0 @@
-{
-  "source_id": "wh_no_limits",
-  "adapter": "snowflake",
-  "credential_ref": "secret://cce/wh_no_limits",
-  "max_rows": 200,
-  "schema_scope": [
-    "ANALYTICS"
-  ]
-}

@@ -1,1 +1,0 @@
-{"source_id":"gdrive_contracts","adapter":"google-drive","credential_ref":"vault://cce/gdrive","refresh_token":"1//abc","fetch_timeout_ms":30000,"max_objects":500,"object_scope":["folder:0ABCxyz"]}

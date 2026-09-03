@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Direct tests of the two ChangeObserver implementations, exercising the
-real skill-document-sync / skill-schema-discovery / skill-source-metadata-store
-/ skill-source-sync functions -- no mocking of Skill logic, only the
-live-driver stand-ins (object/catalog listers)."""
+"""Direct tests of deterministic ChangeObserver implementations."""
 import os
 import sys
 import unittest

@@ -166,6 +166,31 @@ class SchemaCardTests(unittest.TestCase):
         self.assertEqual(table["row_count"], 7)
         self.assertEqual(table["sample_row"], {"A": "hi", "B": 1})
 
+    def test_get_information_schema_card_never_queries_source_tables(self):
+        observed_sql = []
+
+        def script(sql, params=None):
+            observed_sql.append(sql)
+            if "CREATE TEMPORARY TABLE" in sql:
+                raise ProgrammingError("Insufficient privileges")
+            if "information_schema.columns" in sql:
+                rows = [("D", "S", "T1", "A", "VARCHAR", "YES")]
+                return rows, None
+            if "COUNT" in sql or "LIMIT 1" in sql:
+                raise AssertionError("metadata-only schema card must not query source tables")
+            return [], None
+
+        fake_conn = FakeConnection(script)
+        connector = SnowflakeConnector(make_config(), driver_connect=lambda **kw: fake_conn)
+        with _patched_credential(), _patched_key_der():
+            connector.connect()
+        card = connector.get_information_schema_card("S")
+        self.assertEqual(card["schema"], "S")
+        self.assertEqual(card["tables"][0]["name"], "T1")
+        self.assertIsNone(card["tables"][0]["row_count"])
+        self.assertIsNone(card["tables"][0]["sample_row"])
+        self.assertFalse(any("COUNT" in sql or "LIMIT 1" in sql for sql in observed_sql))
+
     def test_max_tables_caps_the_number_of_tables_returned(self):
         def script(sql, params=None):
             if "CREATE TEMPORARY TABLE" in sql:

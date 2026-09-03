@@ -1,6 +1,0 @@
-{
-  "adapter": "mssql",
-  "kind": "structured",
-  "schema_version": "1.0",
-  "capabilities": {"write_probe": true, "statement_timeout": true, "row_cap": true, "schema_scope": true}
-}

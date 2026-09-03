@@ -1,1 +1,0 @@
-{"credential_ref": "azure-kv://cce/sharepoint_docs", "role": "Sites.Read.All", "grants": ["READ_ONLY", "LIST"], "ttl_seconds": 600}

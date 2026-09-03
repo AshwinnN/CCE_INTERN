@@ -26,6 +26,8 @@ def _load_validate():
 class StructuredConnectRegressionTests(unittest.TestCase):
 
     def test_every_test_suite_case_matches_expected_output(self):
+        if not os.path.isfile(os.path.join(SKILL_DIR, "scripts", "validate_source_profile.py")):
+            self.skipTest("skill-strucutred_source_connect scripts are not part of deterministic runtime")
         validate, default_registry = _load_validate()
         with open(os.path.join(SKILL_DIR, "validation", "test-suite.json")) as fh:
             suite = json.load(fh)

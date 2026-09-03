@@ -163,8 +163,8 @@ class ConnectorAgent:
                     catalog_lister=self._catalog_lister,
                     metadata_store_dict=self._structured_metadata_store,
                 )
-                skill_names = ("skill-dialect-profile", "skill-sql-guard", "skill-schema-discovery",
-                               "skill-source-metadata-store", "skill-source-sync")
+                observation_steps = ("code.schema-card-builder", "code.source-metadata-store",
+                                     "code.source-sync")
             else:
                 if self._object_lister is None:
                     raise ObserverRejected("NO_OBJECT_LISTER_CONFIGURED")
@@ -173,10 +173,10 @@ class ConnectorAgent:
                     supports_incremental=descriptor.get("capabilities", {}).get("incremental_sync", False),
                     object_lister=self._object_lister,
                 )
-                skill_names = ("skill-document-sync",)
+                observation_steps = ("code.document-sync",)
 
             result = observer.start(handle, checkpoint_in) if mode == "start" else observer.poll(handle, checkpoint_in)
-            for name in skill_names:
+            for name in observation_steps:
                 skill_trace.append(SkillTraceEntry(skill=name, status="success", trace_id=trace_id))
 
         except ObserverRejected:

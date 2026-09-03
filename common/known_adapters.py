@@ -1,26 +1,14 @@
 #!/usr/bin/env python3
-"""MVP STUB -- replace with a persistent Source Registry service/repository.
+"""MVP source-registry provider.
 
-skill-source-registry validates a *submitted* registry entry; it has no
-lookup-by-adapter-key function and no persistence. Nothing else in this repo
-stores "here are the adapters we know about, keyed by name." The Connector
-Agent needs exactly that to turn a request's `source_adapter` string into the
-full candidate entry skill-source-registry.validate() can check.
+This module is the lookup boundary that turns `source_adapter` into a
+registry descriptor. It performs no I/O and no credential handling; the
+Connector Agent validates each returned descriptor before trusting it.
 
-This module is that lookup, and nothing else. It performs no I/O, no
-credential handling, and no validation logic of its own -- every entry it
-returns still has to pass skill-source-registry.validate() before the Agent
-trusts it. Only adapters actually supported by an existing connect skill are
-seeded here (matching skill-strucutred_source_connect's DEFAULT_REGISTRY and
-skill-document-source-connect's REGISTRY); this is not a place to register a
-new adapter that has no connect-skill support yet.
-
-Capability keys match skill-source-registry's own CAPABILITY_SETS exactly
-(write_probe, statement_timeout, row_cap, schema_scope for structured;
-write_probe, change_detection, entitlement_capture, content_fetch,
-incremental_sync for unstructured) -- not the illustrative "connect"/
-"read_only" names used in early design prompts, per inspection of the real
-script.
+Capability keys are stable runtime contract names: write_probe,
+statement_timeout, row_cap, schema_scope for structured sources; write_probe,
+change_detection, entitlement_capture, content_fetch, incremental_sync for
+unstructured sources.
 """
 import copy
 
@@ -38,7 +26,7 @@ _UNSTRUCTURED_CAPS_SINGLE_OBJECT = {
 }
 
 _KNOWN_ADAPTERS = {
-    # Structured -- matches skill-strucutred_source_connect's DEFAULT_REGISTRY.
+    # Structured sources.
     "snowflake":  {"adapter": "snowflake", "kind": "structured", "dialect": "snowflake",
                    "capabilities": _STRUCTURED_CAPS, "schema_version": "1.0",
                    "deprecated": False, "status": "READY", "violated_rule": None},
@@ -52,7 +40,7 @@ _KNOWN_ADAPTERS = {
                    "capabilities": _STRUCTURED_CAPS, "schema_version": "1.0",
                    "deprecated": False, "status": "READY", "violated_rule": None},
 
-    # Unstructured -- matches skill-document-source-connect's REGISTRY.
+    # Unstructured sources.
     "google-drive": {"adapter": "google-drive", "kind": "unstructured", "dialect": None,
                       "capabilities": _UNSTRUCTURED_CAPS_FULL, "schema_version": "1.0",
                       "deprecated": False, "status": "READY", "violated_rule": None},
@@ -71,19 +59,21 @@ _KNOWN_ADAPTERS = {
     "local-fs":     {"adapter": "local-fs", "kind": "unstructured", "dialect": None,
                       "capabilities": _UNSTRUCTURED_CAPS_SINGLE_OBJECT, "schema_version": "1.0",
                       "deprecated": False, "status": "READY", "violated_rule": None},
+    "azure-blob":   {"adapter": "azure-blob", "kind": "unstructured", "dialect": None,
+                      "capabilities": _UNSTRUCTURED_CAPS_FULL, "schema_version": "1.0",
+                      "deprecated": False, "status": "READY", "violated_rule": None},
 }
 
 
 class AdapterRegistryProvider:
-    """Interface a real persistent registry service should implement to
-    replace this stub without any change to Agent orchestration code."""
+    """Interface a persistent registry service can implement."""
 
     def get(self, adapter_key):
         raise NotImplementedError
 
 
 class StubAdapterRegistryProvider(AdapterRegistryProvider):
-    """MVP STUB -- replace with persistent Source Registry service/repository."""
+    """In-memory registry provider for local development and tests."""
 
     def get(self, adapter_key):
         entry = _KNOWN_ADAPTERS.get(adapter_key)
