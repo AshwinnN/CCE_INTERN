@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package cce.v1;
+
+import "cce/v1/common.proto";
+
+service QueryService {
+  rpc Query(QueryRequest) returns (QueryResponse);
+}
+
+message QueryRequest {
+  string question = 1;
+  Actor actor = 2;
+  bool context_enabled = 3;
+}
+
+message QueryResponse {
+  string answer = 1;
+  string trace_id = 2;
+  repeated Provenance citations = 3;
+  bool context_used = 4;
+  Error error = 5;
+}

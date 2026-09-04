@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package cce.v1;
+
+import "cce/v1/common.proto";
+
+service PackageService {
+  rpc GetPackage(GetPackageRequest) returns (Package);
+  rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
+  rpc GetPackageVersion(GetPackageVersionRequest) returns (PackageVersion);
+}
+
+message GetPackageRequest {
+  string package_id = 1;
+  Actor actor = 2;
+}
+
+message ListPackagesRequest {
+  PageRequest page = 1;
+  Actor actor = 2;
+}
+
+message GetPackageVersionRequest {
+  string package_id = 1;
+  string version = 2;
+  Actor actor = 3;
+}
+
+message ListPackagesResponse {
+  repeated Package packages = 1;
+  PageResponse page = 2;
+}
+
+message Package {
+  string package_id = 1;
+  string name = 2;
+  string active_version = 3;
+  Error error = 4;
+}
+
+message PackageVersion {
+  string package_id = 1;
+  string version = 2;
+  string status = 3;
+  Error error = 4;
+}

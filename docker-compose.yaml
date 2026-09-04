@@ -1,20 +1,21 @@
 services:
   postgres:
-    container_name: cce-demo-postgres
+    container_name: cce-control-postgres
     image: postgres:16
     environment:
       POSTGRES_USER: cce_admin
       POSTGRES_PASSWORD: cce_password
-      POSTGRES_DB: cce_metadata
+      POSTGRES_DB: cce_control
     ports:
       - "5434:5432"
     volumes:
-      - cce_demo_postgres_data:/var/lib/postgresql/data
+      - cce_control_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U cce_admin -d cce_metadata"]
+      test: ["CMD-SHELL", "pg_isready -U cce_admin -d cce_control"]
       interval: 5s
       timeout: 5s
-      retries: 3
+      retries: 10
+      start_period: 10s
 
 volumes:
-  cce_demo_postgres_data:
+  cce_control_postgres_data:

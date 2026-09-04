@@ -1,78 +1,59 @@
-# CCE Tool — Production MVP Solution Package
+# CCE Tool
 
-This is the review/build package for the CoStrategix Context Engine (CCE).
+CCE (CoStrategix Context Engine) is a governed context server. The backend
+owns source registration, ingestion orchestration, governance, context
+packages, guarded query runtime boundaries, traceability, and MCP exposure.
 
-The folder is intentionally organized so Antigravity can use the repository itself as the source of truth.
-
-## Source-of-truth order
-
-1. `docs/specs/01-business-spec.md`
-2. `docs/specs/02-design-spec.md`
-3. `docs/specs/03-technical-spec.md`
-4. `skills/*/SKILL.md`
-5. `agent/Agent.md`
-6. `docs/governance/DECISIONS.md`
-
-## Main folders
+## Layout
 
 ```text
-CCE-Tool/
-├── README.md
-├── AGENTS.md
-├── .antigravity/
-│   └── build-prompt.md
-├── docs/
-│   ├── specs/
-│   ├── governance/
-│   └── review/
-├── skills/
-│   ├── skill-cce-connector-adapter/
-│   ├── skill-cce-ingest-ground/
-│   ├── skill-cce-entity-resolution/
-│   ├── skill-cce-ambiguity-resolution/
-│   ├── skill-cce-governance/
-│   ├── skill-cce-context-package/
-│   ├── skill-cce-context-assembly/
-│   ├── skill-cce-governed-query/
-│   ├── skill-cce-proof-evaluation/
-│   ├── skill-cce-lineage-observability/
-│   ├── skill-cce-mcp-broker/
-│   └── skill-cce-package-validation/
-├── agent/
-│   └── Agent.md
-└── prompts/
-    └── ANTIGRAVITY_CCE_BUILD_PROMPT.md
+backend/                  Python gRPC/MCP backend
+backend/proto/            Protobuf-first service contracts
+backend/src/cce/          CCE application package
+backend/skills/           Versioned skill assets
+backend/migrations/       cce_control PostgreSQL migrations
+backend/tests/            Unit, integration, contract, and e2e tests
+frontend/                 Placeholder for future UI
+scripts/                  Local generation, migration, and diagnostic scripts
+deploy/docker/            Backend container image
+docs/                     Architecture, ADRs, and source references
 ```
 
-## Important
+## Local Commands
 
-This package contains the product-definition artifacts. It is not the application implementation yet.
+Install the backend in editable mode from `backend/`:
 
-Antigravity should create the implementation under a separate application structure such as:
-
-```text
-src/
-tests/
-migrations/
-deploy/
-scripts/
+```powershell
+pip install -e .[dev]
 ```
 
-Do not move Specs or Skills into application source code. They are build contracts.
+Run tests from `backend/`:
 
-## MVP
+```powershell
+python -m pytest
+```
 
-The first concrete adapters are:
-- Snowflake
-- Google Docs
+Generate protobuf code:
 
-The CCE core must remain:
-- domain agnostic
-- source agnostic
-- model/provider agnostic
-- storage agnostic through ports
-- agent-framework agnostic
+```powershell
+python ..\scripts\generate_proto.py
+```
 
-The initial graph/context store is ArcadeDB behind an adapter boundary.
+Start the gRPC backend:
 
-React is intentionally excluded from this repository's implementation scope. It will consume the CCE REST/API layer later.
+```powershell
+python -m cce.main
+```
+
+Local PostgreSQL uses the `cce_control` database:
+
+```powershell
+docker compose up postgres
+```
+
+## Architecture
+
+The target repository structure is tracked at
+`docs/architecture/structure.md`. AgenticPlane remains behind
+`backend/src/cce/integrations/agentic_plane/`; CCE does not own graph,
+vector, embedding, chunking, or retrieval infrastructure.

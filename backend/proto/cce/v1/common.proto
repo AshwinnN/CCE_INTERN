@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package cce.v1;
+
+message Actor {
+  string actor_id = 1;
+  repeated string roles = 2;
+}
+
+message PageRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message PageResponse {
+  string next_page_token = 1;
+}
+
+message Provenance {
+  string source_id = 1;
+  string source_ref = 2;
+  string version = 3;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  bool retryable = 3;
+}

@@ -1,0 +1,27 @@
+Metadata-Version: 2.4
+Name: cce-backend
+Version: 0.1.0
+Summary: CoStrategix Context Engine governed context server
+Requires-Python: >=3.10
+Requires-Dist: azure-core==1.41.0
+Requires-Dist: azure-storage-blob==12.30.1
+Requires-Dist: azure-storage-file-datalake==12.25.0
+Requires-Dist: cryptography==50.0.1
+Requires-Dist: python-dotenv==1.2.3
+Requires-Dist: snowflake-connector-python==4.7.2
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: python-magic-bin>=0.4.14; platform_system == "Windows"
+Requires-Dist: python-magic>=0.4.27; platform_system != "Windows"
+Requires-Dist: docling>=1.0.0
+Requires-Dist: paddleocr>=2.7.0
+Requires-Dist: paddlepaddle>=2.6.0
+Requires-Dist: openpyxl>=3.1.2
+Requires-Dist: pandas>=2.0.0
+Requires-Dist: langgraph==1.2.11
+Requires-Dist: requests>=2.31.0
+Requires-Dist: psycopg2-binary>=2.9.9
+Requires-Dist: grpcio>=1.64.0
+Requires-Dist: grpcio-tools>=1.64.0
+Requires-Dist: protobuf>=5.27.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0.0; extra == "dev"

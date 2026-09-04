@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package cce.v1;
+
+import "cce/v1/common.proto";
+
+service GovernanceService {
+  rpc ListProposals(ListProposalsRequest) returns (ListProposalsResponse);
+  rpc GetProposal(GetProposalRequest) returns (Proposal);
+  rpc ApproveProposal(ApproveProposalRequest) returns (Proposal);
+  rpc RejectProposal(RejectProposalRequest) returns (Proposal);
+}
+
+message ListProposalsRequest {
+  PageRequest page = 1;
+  Actor actor = 2;
+}
+
+message ListProposalsResponse {
+  repeated Proposal proposals = 1;
+  PageResponse page = 2;
+}
+
+message GetProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+}
+
+message ApproveProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+  string comment = 3;
+}
+
+message RejectProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+  string reason = 3;
+}
+
+message Proposal {
+  string proposal_id = 1;
+  string status = 2;
+  Error error = 3;
+}

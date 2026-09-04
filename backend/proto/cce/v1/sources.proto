@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package cce.v1;
+
+import "cce/v1/common.proto";
+
+service SourceService {
+  rpc RegisterSource(RegisterSourceRequest) returns (SourceResponse);
+  rpc TestConnection(TestConnectionRequest) returns (SourceResponse);
+  rpc TriggerIngestion(TriggerIngestionRequest) returns (IngestionStatus);
+  rpc GetIngestionStatus(GetIngestionStatusRequest) returns (IngestionStatus);
+}
+
+message RegisterSourceRequest {
+  string adapter = 1;
+  string source_id = 2;
+  string credential_ref = 3;
+  Actor actor = 4;
+}
+
+message TestConnectionRequest {
+  string source_id = 1;
+  Actor actor = 2;
+}
+
+message TriggerIngestionRequest {
+  string source_id = 1;
+  Actor actor = 2;
+}
+
+message GetIngestionStatusRequest {
+  string ingestion_run_id = 1;
+  Actor actor = 2;
+}
+
+message SourceResponse {
+  string source_id = 1;
+  string status = 2;
+  Error error = 3;
+}
+
+message IngestionStatus {
+  string ingestion_run_id = 1;
+  string status = 2;
+  Error error = 3;
+}

@@ -1,6 +1,8 @@
 # Secrets / local environment — never commit real values.
 .env
+backend/.env
 !.env.example
+!backend/.env.example
 
 # Python
 __pycache__/
@@ -8,7 +10,11 @@ __pycache__/
 .venv/
 .tools/
 
-# Local ingestion workflow checkpoint state (common/tools/checkpoint_manager.py)
+# Generated protobuf Python code.
+backend/src/cce/gen/**/*.py
+!backend/src/cce/gen/**/__init__.py
+
+# Local ingestion workflow checkpoint state.
 .ingestion_checkpoints/
 
 _DELETED_*
