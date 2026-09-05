@@ -43,4 +43,8 @@ message PackageVersion {
   string version = 2;
   string status = 3;
   Error error = 4;
+  repeated string assets = 5;
+  string scope = 6;
+  string created_at = 7;
+  string parent_version = 8;
 }

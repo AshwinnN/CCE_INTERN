@@ -42,4 +42,11 @@ message Proposal {
   string proposal_id = 1;
   string status = 2;
   Error error = 3;
+  string asset_type = 4;
+  string payload = 5;
+  repeated Provenance evidence = 6;
+  string proposed_at = 7;
+  string approved_at = 8;
+  string approver = 9;
+  string valid_until = 10;
 }

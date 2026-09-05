@@ -30,7 +30,19 @@ def main() -> int:
         str(OUT),
         *proto_files,
     ]
-    return subprocess.call(cmd)
+    result = subprocess.call(cmd)
+    if result != 0:
+        return result
+    _rewrite_generated_imports()
+    return 0
+
+
+def _rewrite_generated_imports() -> None:
+    generated = (OUT / "cce" / "v1").glob("*_pb2*.py")
+    for path in generated:
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("from cce.v1 import", "from cce.gen.cce.v1 import")
+        path.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

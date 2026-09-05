@@ -18,6 +18,13 @@ class QueryResponse:
     trace_id: str | None = None
     citations: list[dict[str, Any]] = field(default_factory=list)
     context_used: bool = False
+    applied_rule: str = ""
+    package_id: str = ""
+    package_version: str = ""
+    executed_sql: str = ""
+    approver: str = ""
+    valid_until: str = ""
+    confidence: float = 0.0
 
 
 class QueryService:

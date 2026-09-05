@@ -45,10 +45,17 @@ Start the gRPC backend:
 python -m cce.main
 ```
 
-Local PostgreSQL uses the `cce_control` database:
+Local PostgreSQL uses the `cce_control` database. To start the server and
+database together, run:
 
 ```powershell
-docker compose up postgres
+docker compose up --build
+```
+
+Smoke-check the gRPC health endpoint:
+
+```powershell
+docker compose exec backend python /app/scripts/smoke_server.py --target localhost:50051
 ```
 
 ## Architecture

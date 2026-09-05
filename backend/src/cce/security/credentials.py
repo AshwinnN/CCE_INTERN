@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic, env-backend credential fetch for connectors/.
+"""Deterministic credential fetch for connectors/.
 
 Mirrors skill-credential-resolution/references/backend-contract.md's
 `fetch(ref, ttl_seconds) -> driver-native credential`: hands the secret
@@ -10,19 +10,14 @@ proof. skill-credential-resolution still owns the *authorization* question
 is the actual secret at this reference," for the one backend this repo has
 real material for.
 
-Only the "env" scheme is implemented -- the same backend
-skills/skill-credential-resolution/scripts/resolve_credential.py's
-BACKENDS table already declares for "a credential held in a local/process
-environment variable (e.g. a .env-loaded value)". vault://, aws-sm://,
-gcp-sm://, azure-kv:// are real secret-store integrations this repository
-has no client library or endpoint for; adding one is a new function here,
-never a reason to fake the others (same discipline as
-common/tools/source_connector.py's fetch_structured() gap note).
+The "env" scheme remains for local dev/CI. The "azure-kv" scheme is for
+Azure Key Vault references in production-like environments.
 """
 import os
 from typing import Optional
+from urllib.parse import urlparse
 
-SUPPORTED_SCHEMES = ("env",)
+SUPPORTED_SCHEMES = ("env", "azure-kv")
 
 
 class CredentialResolutionError(Exception):
@@ -45,10 +40,76 @@ def load_env_credential(credential_ref: str) -> str:
     if scheme not in SUPPORTED_SCHEMES:
         raise CredentialResolutionError(
             "unsupported credential backend %r (only %s implemented)" % (scheme, SUPPORTED_SCHEMES))
+    if scheme != "env":
+        raise CredentialResolutionError("credential_ref %r is not an env ref" % credential_ref)
     value = os.environ.get(var_name)
     if not value:
         raise CredentialResolutionError("environment variable %r is unset" % var_name)
     return value
+
+
+def load_azure_kv_credential(credential_ref: str) -> str:
+    """"azure-kv://vault-name/secret-name" -> Key Vault secret value.
+
+    Authentication is intentionally delegated to DefaultAzureCredential so
+    the deployment team can choose managed identity or service-principal
+    environment variables without a code branch here.
+    """
+    parsed = urlparse(credential_ref)
+    if parsed.scheme != "azure-kv" or not parsed.netloc or not parsed.path.strip("/"):
+        raise CredentialResolutionError(
+            "azure Key Vault credential refs must use azure-kv://<vault-name>/<secret-name>"
+        )
+
+    vault_name = parsed.netloc
+    secret_name = parsed.path.strip("/")
+    try:
+        from azure.identity import DefaultAzureCredential
+        from azure.keyvault.secrets import SecretClient
+
+        client = SecretClient(
+            vault_url=f"https://{vault_name}.vault.azure.net/",
+            credential=DefaultAzureCredential(),
+        )
+        secret = client.get_secret(secret_name)
+    except Exception as exc:
+        raise CredentialResolutionError(
+            "failed to resolve Azure Key Vault credential %r: %s"
+            % (credential_ref, exc)
+        ) from exc
+
+    if not getattr(secret, "value", None):
+        raise CredentialResolutionError(
+            "Azure Key Vault secret %r is unset or empty" % secret_name
+        )
+    return secret.value
+
+
+def _azure_kv_passphrase_ref(credential_ref: str) -> str:
+    """Snowflake passphrase convention for Key Vault credentials.
+
+    When the primary Snowflake private key ref is
+    azure-kv://<vault>/<secret>, the optional passphrase is looked up at a
+    second secret in the same vault named <secret>-passphrase.
+    """
+    parsed = urlparse(credential_ref)
+    return "azure-kv://%s/%s-passphrase" % (parsed.netloc, parsed.path.strip("/"))
+
+
+def _dispatch(credential_ref: str) -> str:
+    scheme, _ = _parse_ref(credential_ref)
+    if scheme == "env":
+        return load_env_credential(credential_ref)
+    if scheme == "azure-kv":
+        return load_azure_kv_credential(credential_ref)
+    raise CredentialResolutionError(
+        "unsupported credential backend %r (supported: %s)"
+        % (scheme, SUPPORTED_SCHEMES)
+    )
+
+
+def load_credential(credential_ref: str) -> str:
+    return _dispatch(credential_ref)
 
 
 def load_snowflake_keypair_credential(credential_ref: str) -> dict:
@@ -59,7 +120,13 @@ def load_snowflake_keypair_credential(credential_ref: str) -> dict:
 
     Returns {"private_key_pem": str, "passphrase": Optional[str]}.
     """
-    _, var_name = _parse_ref(credential_ref)
-    private_key_pem = load_env_credential(credential_ref)
-    passphrase: Optional[str] = os.environ.get("%s_PASSPHRASE" % var_name) or None
+    scheme, var_name = _parse_ref(credential_ref)
+    private_key_pem = _dispatch(credential_ref)
+    if scheme == "azure-kv":
+        try:
+            passphrase = _dispatch(_azure_kv_passphrase_ref(credential_ref))
+        except CredentialResolutionError:
+            passphrase = None
+    else:
+        passphrase = os.environ.get("%s_PASSPHRASE" % var_name) or None
     return {"private_key_pem": private_key_pem, "passphrase": passphrase}

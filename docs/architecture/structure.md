@@ -7,7 +7,7 @@ CCE does **not** own vector storage, graph storage, embeddings, chunking, graph 
 ## Architecture rules
 
 - Organize code by CCE capability/module, not by generic `common` or framework names.
-- Use **gRPC + Protobuf** as the primary server contract; no REST/JSON API layer in the MVP.
+- Use **gRPC + Protobuf** as the primary server contract; the only JSON/HTTP surface is the thin adapter described in `docs/decisions/ADR-004-json-adapter.md`.
 - Keep the CCE core domain-blind; domain knowledge lives in governed context packages.
 - Keep deterministic logic deterministic. Use agents only where reasoning is required.
 - Skills are versioned agent assets (`SKILL.md`, scripts, references), not generic prompts.

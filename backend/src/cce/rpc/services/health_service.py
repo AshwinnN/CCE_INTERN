@@ -8,4 +8,9 @@ class HealthService:
     def Check(self, request, context):
         from cce.gen.cce.v1 import health_pb2
 
-        return health_pb2.HealthCheckResponse(status=health_pb2.HealthCheckResponse.SERVING)
+        status = (
+            health_pb2.HealthCheckResponse.SERVING
+            if getattr(self.app, "ready", False)
+            else health_pb2.HealthCheckResponse.NOT_SERVING
+        )
+        return health_pb2.HealthCheckResponse(status=status)

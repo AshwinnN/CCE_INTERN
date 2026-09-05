@@ -9,6 +9,8 @@ __pycache__/
 *.pyc
 .venv/
 .tools/
+**_pytest**
+**__pycache__**
 
 # Generated protobuf Python code.
 backend/src/cce/gen/**/*.py
