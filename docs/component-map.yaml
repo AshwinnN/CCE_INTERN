@@ -1,0 +1,518 @@
+version: 1
+truth_order:
+  - source_code
+  - architecture_and_adrs
+  - vision_and_mvp
+
+modules:
+  transports:
+    path: backend/src/cce/rpc
+    purpose: >
+      Expose protobuf-first gRPC handlers; FastAPI is a sibling thin adapter over the same Application.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/rpc/server.py:create_server
+        - backend/src/cce/http/app.py:create_app
+      important_components:
+        - backend/src/cce/rpc/services/health_service.py:HealthService
+        - backend/src/cce/rpc/services/source_service.py:SourceRPCService
+        - backend/src/cce/rpc/services/query_service.py:QueryRPCService
+      owns:
+        - transport mapping
+        - server registration
+    inputs:
+      - backend/proto/cce/v1/*.proto
+    outputs:
+      - gRPC responses
+      - JSON responses
+    depends_on:
+      - bootstrap/Application
+      - runtime service
+      - governance service
+      - context package service
+      - source repository
+    used_by:
+      - external clients
+    invariants:
+      enforced:
+        - gRPC and HTTP delegate to shared Application objects
+      required_but_not_fully_enforced:
+        - authentication and authorization before service execution
+        - source ingestion trigger invokes the real ingestion workflow
+    known_gaps:
+      - Source TestConnection/TriggerIngestion/GetIngestionStatus are placeholders.
+      - Governance/package/query transports delegate to placeholder services.
+      - gRPC auth/authz interceptors are empty and not registered.
+    related_docs:
+      - backend/src/cce/rpc/AGENTS.md
+      - backend/src/cce/http/AGENTS.md
+      - docs/decisions/ADR-001-grpc-protobuf.md
+      - docs/decisions/ADR-004-json-adapter.md
+
+  connectors:
+    path: backend/src/cce/connectors
+    purpose: >
+      Provide provider-neutral connector contracts, routing/observation and provider access.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/connectors/agent.py:ConnectorAgent.handle
+        - backend/src/cce/connectors/factory.py:ConnectorFactory.create
+      important_components:
+        - backend/src/cce/connectors/structured/snowflake/connector.py:SnowflakeConnector
+        - backend/src/cce/connectors/fetch.py:snowflake_schema_fetcher
+        - backend/src/cce/connectors/fetch.py:azure_blob_fetcher
+        - backend/src/cce/connectors/registry.py:StubAdapterRegistryProvider
+      owns:
+        - provider connection
+        - source discovery/read
+        - source-side read-only verification where implemented
+        - source change-event generation
+    inputs:
+      - ConnectorRequest
+      - credential references
+    outputs:
+      - ConnectorResponse
+      - source change events
+      - schema cards/raw bytes
+    depends_on:
+      - security.credentials
+      - provider SDKs
+    used_by:
+      - ingestion.service
+      - ingestion.orchestrator
+    invariants:
+      enforced:
+        - Snowflake rejects credentials when a live write probe succeeds.
+      required_but_not_fully_enforced:
+        - all registry READY adapters are executable
+        - durable change checkpoints
+        - provider-proven entitlement capture
+    known_gaps:
+      - Structured factory implements only Snowflake despite broader READY registry entries.
+      - Observation provider listers are caller-injected and observation checkpoint/dedup stores are in-memory.
+      - Azure Blob implementation is split between AzureBlobSource and fetch helper paths.
+    related_docs:
+      - backend/src/cce/connectors/AGENTS.md
+
+  ingestion:
+    path: backend/src/cce/ingestion
+    purpose: >
+      Convert source change events into canonical normalized content, persist structured metadata,
+      call DLP hooks, emit downstream, and checkpoint processing.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/ingestion/service.py:run_pipeline
+        - backend/src/cce/ingestion/orchestrator.py:run_ingestion
+      important_components:
+        - backend/src/cce/ingestion/orchestrator.py:build_ingestion_workflow
+        - backend/src/cce/ingestion/parsers/factory.py:ParserFactory
+        - backend/src/cce/ingestion/normalizers/document.py:normalize_to_canonical
+        - backend/src/cce/ingestion/checkpoint.py:IngestionCheckpointStore
+      owns:
+        - ingestion orchestration
+        - parsing and normalization
+        - structured metadata snapshot write
+        - processing checkpoint
+    inputs:
+      - source change events
+      - connector handles
+    outputs:
+      - CanonicalDocument-like payload
+      - structured metadata snapshots
+      - SDK HTTP payload or dry-run
+      - ingestion checkpoint
+    depends_on:
+      - connectors
+      - persistence
+      - security.dlp
+    used_by:
+      - callable ingestion service only; source RPC/HTTP trigger is not wired
+    invariants:
+      enforced:
+        - structured snapshots are written as new snapshot IDs
+        - parser selection is MIME-based through ParserFactory
+      required_but_not_fully_enforced:
+        - real DLP/PII redaction
+        - entitlement capture
+        - proposals are created instead of directly serving content
+        - durable downstream index/graph write
+    known_gaps:
+      - DLP implementation is a no-op stub.
+      - CCE_SDK_ENDPOINT absence is treated as successful dry-run emission.
+      - No governance proposal creation follows ingestion.
+      - Server TriggerIngestion does not call this module.
+    related_docs:
+      - backend/src/cce/ingestion/AGENTS.md
+      - backend/src/cce/ingestion/FLOW.md
+
+  persistence:
+    path: backend/src/cce/persistence
+    purpose: >
+      Persist CCE-owned registration and structured metadata state in PostgreSQL.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/persistence/postgres/metadata_repository.py:PostgreSQLMetadataRepository
+        - backend/src/cce/persistence/postgres/source_repository.py:PostgresSourceRepository
+        - backend/src/cce/persistence/postgres/migrations.py:initialize_control_postgres
+      important_components:
+        - backend/src/cce/persistence/ports.py:MetadataRepository
+        - backend/migrations/cce_control/001_registry.sql
+        - backend/migrations/cce_control/002_metadata.sql
+      owns:
+        - cce_control persistence contracts and implementations
+    inputs:
+      - source registration
+      - schema snapshots/tables/columns/constraints/relationships
+    outputs:
+      - durable PostgreSQL state
+    depends_on:
+      - PostgreSQL
+    used_by:
+      - bootstrap
+      - ingestion
+      - source RPC/HTTP registration
+    invariants:
+      enforced:
+        - structured snapshot rows are snapshot-scoped and deterministic entity IDs are used.
+      required_but_not_fully_enforced:
+        - governance/context/runtime/audit state stored in cce_control
+    known_gaps:
+      - Governance/context/runtime/audit migrations contain schemas only.
+      - PostgresCheckpointRepository is not implemented.
+      - Source repository stores credential_ref in cce_source.display_name and has no read/list method.
+    related_docs:
+      - backend/src/cce/persistence/AGENTS.md
+      - docs/decisions/ADR-002-cce-control-postgres.md
+
+  security:
+    path: backend/src/cce/security
+    purpose: >
+      Resolve secret references and define DLP, entitlement and role boundaries.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/security/credentials.py:load_credential
+        - backend/src/cce/security/credentials.py:load_snowflake_keypair_credential
+      important_components:
+        - backend/src/cce/security/dlp.py:classify_text
+        - backend/src/cce/security/entitlements.py:assert_entitled
+        - backend/src/cce/security/roles.py:has_role
+      owns:
+        - secret reference resolution
+        - security policy boundaries
+    inputs:
+      - env:// or azure-kv:// credential references
+    outputs:
+      - resolved credential values
+      - allow/deny helper decisions
+    depends_on:
+      - Azure Identity/Key Vault SDK
+    used_by:
+      - Snowflake connector
+      - ingestion DLP nodes
+    invariants:
+      enforced:
+        - credential resolver supports env and Azure Key Vault references
+      required_but_not_fully_enforced:
+        - real DLP/PII classification and redaction
+        - entitlements at retrieval
+        - authenticated/authorized API calls
+    known_gaps:
+      - DLP always reports PUBLIC and redaction is no-op.
+      - Snowflake/Azure Blob environment builders do not consistently dereference nested azure-kv:// values.
+      - role/entitlement helpers have no active API/runtime consumers.
+    related_docs:
+      - backend/src/cce/security/AGENTS.md
+
+  governance:
+    path: backend/src/cce/governance
+    purpose: >
+      Target proposal/review/approval lifecycle and approved-only policy boundary.
+    status: planned
+    implementation:
+      entrypoints:
+        - backend/src/cce/governance/service.py:GovernanceService
+      important_components:
+        - backend/src/cce/governance/state_machine.py:can_transition
+        - backend/src/cce/governance/policy.py:require_approved
+      owns:
+        - target human approval lifecycle
+    inputs:
+      - proposed context assets
+    outputs:
+      - target approved/rejected decisions
+    depends_on: []
+    used_by:
+      - RPC/HTTP adapters call placeholder service
+      - context package builder imports approval helper
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - machines propose; humans approve
+        - approved-only assets cross the serving boundary
+    known_gaps:
+      - Service returns empty/NOT_FOUND data.
+      - No governance repository/tables beyond CREATE SCHEMA.
+      - State-machine and policy helpers are not part of a live lifecycle.
+    related_docs:
+      - backend/src/cce/governance/AGENTS.md
+
+  context_packages:
+    path: backend/src/cce/context_packages
+    purpose: >
+      Target versioned domain package composition, scope, inheritance and governed assets.
+    status: planned
+    implementation:
+      entrypoints:
+        - backend/src/cce/context_packages/service.py:ContextPackageService
+      important_components:
+        - backend/src/cce/context_packages/builder.py:assert_assets_approved
+        - backend/src/cce/context_packages/versioning.py:next_patch_version
+        - backend/src/cce/context_packages/inheritance.py:resolve_overrides
+      owns:
+        - target package assembly and versioning
+    inputs:
+      - target approved assets
+    outputs:
+      - target domain context packages
+    depends_on:
+      - governance.policy
+    used_by:
+      - RPC/HTTP adapters call placeholder service
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - package contains approved assets only
+        - package versions are immutable/auditable
+        - domain/package isolation and override precedence
+    known_gaps:
+      - No persistent package store or functional service.
+      - Helper functions are disconnected from an execution path.
+    related_docs:
+      - backend/src/cce/context_packages/AGENTS.md
+
+  runtime:
+    path: backend/src/cce/runtime
+    purpose: >
+      Target business-question resolution, governed context assembly, guarded live SQL and Context OFF/ON proof.
+    status: planned
+    implementation:
+      entrypoints:
+        - backend/src/cce/runtime/service.py:QueryService.query
+        - backend/src/cce/runtime/orchestrator.py:RuntimeOrchestrator.run
+      important_components:
+        - backend/src/cce/runtime/sql_guard.py:enforce_select_only
+        - backend/src/cce/runtime/retrieval.py:retrieve_evidence
+      owns:
+        - target query reasoning and proof flow
+    inputs:
+      - QueryRequest
+    outputs:
+      - QueryResponse
+    depends_on:
+      - integrations.agentic_plane
+    used_by:
+      - gRPC query handler
+      - HTTP query adapter
+      - MCP query helper
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - approved-only context
+        - SELECT-only timeout/row-capped execution
+        - Context OFF vs ON comparison
+        - explain applied context
+    known_gaps:
+      - QueryService returns a fixed not-implemented answer.
+      - Intent/resolvers/assembler/proof return placeholder values.
+      - SQL generator/executor raise NotImplementedError.
+      - SQL guard is prefix-only and disconnected.
+    related_docs:
+      - backend/src/cce/runtime/AGENTS.md
+
+  traceability:
+    path: backend/src/cce/traceability
+    purpose: >
+      Target answer/governance lineage and audit records distinct from engineering telemetry.
+    status: planned
+    implementation:
+      entrypoints:
+        - backend/src/cce/traceability/service.py:TraceabilityService.record
+      important_components:
+        - backend/src/cce/traceability/models.py:TraceEvent
+      owns:
+        - target answer/governance traceability
+    inputs:
+      - target lifecycle/query events
+    outputs:
+      - target audit trace
+    depends_on: []
+    used_by: []
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - answer carries trace ID, rule/package version, approver, validity, SQL and source provenance
+    known_gaps:
+      - record() returns its input and persists nothing.
+      - audit migration is schema-only.
+    related_docs:
+      - backend/src/cce/traceability/AGENTS.md
+
+  mcp:
+    path: backend/src/cce/mcp
+    purpose: >
+      Target MCP transport over the same governed query runtime.
+    status: planned
+    implementation:
+      entrypoints:
+        - backend/src/cce/mcp/server.py:create_mcp_server
+        - backend/src/cce/mcp/tools/query.py:query
+      important_components: []
+      owns:
+        - target MCP tool exposure only
+    inputs:
+      - target external agent questions/tool calls
+    outputs:
+      - target governed CCE responses
+    depends_on:
+      - runtime.service
+    used_by: []
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - MCP cannot bypass governance
+        - MCP and other transports use the same runtime
+    known_gaps:
+      - create_mcp_server returns a dict rather than an MCP protocol server.
+      - Runtime itself is not implemented.
+    related_docs:
+      - backend/src/cce/mcp/AGENTS.md
+
+  integrations:
+    path: backend/src/cce/integrations
+    purpose: >
+      Isolate external AgenticPlane and LLM implementations from CCE core logic.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/integrations/llm/client.py:complete
+        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.retrieve
+      important_components: []
+      owns:
+        - external SDK/model adapter boundary
+    inputs:
+      - prompts
+      - retrieval questions
+    outputs:
+      - LLM text
+      - target retrieval results
+    depends_on:
+      - Google Gemini LangChain package
+    used_by:
+      - runtime.retrieval uses AgenticPlane placeholder
+    invariants:
+      enforced:
+        - Gemini temperature is set to zero
+      required_but_not_fully_enforced:
+        - AgenticPlane accessed only through adapter
+        - runtime uses the configured LLM where agentic reasoning is required
+    known_gaps:
+      - AgenticPlane retrieve always returns an empty list.
+      - Gemini client has no production call site.
+    related_docs:
+      - backend/src/cce/integrations/AGENTS.md
+      - docs/decisions/ADR-003-agentic-plane-boundary.md
+
+  skills:
+    path: backend/skills
+    purpose: >
+      Store versioned reasoning procedures and deterministic helper/reference assets.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/skills/loader.py:load_skill_function
+        - backend/src/cce/skills/loader.py:load_skill_module
+      important_components:
+        - backend/skills/context_resolution/SKILL.md
+        - backend/skills/entity_resolution/SKILL.md
+        - backend/skills/policy_interpretation/SKILL.md
+        - backend/skills/semantic_mapping/SKILL.md
+        - backend/skills/sql_generation/SKILL.md
+      owns:
+        - agent skill assets
+    inputs: []
+    outputs:
+      - dynamically loaded helper modules when explicitly called
+    depends_on: []
+    used_by:
+      - tests only for current loader usage
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - agentic reasoning uses versioned skills rather than hardcoded domain prompts
+    known_gaps:
+      - No production runtime invokes the skill loader.
+      - Loader comments/examples reference older skill directory names not present under backend/skills.
+    related_docs:
+      - backend/skills/AGENTS.md
+
+  observability:
+    path: backend/src/cce/observability
+    purpose: >
+      Engineering diagnostics separate from governance/audit semantics.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/observability/logging.py:configure_logging
+      important_components:
+        - backend/src/cce/observability/metrics.py:increment
+        - backend/src/cce/observability/tracing.py:current_span
+      owns:
+        - engineering logging/metrics/traces
+    inputs: []
+    outputs:
+      - logging configuration
+    depends_on: []
+    used_by: []
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - observability remains separate from governance traceability
+    known_gaps:
+      - metrics and tracing helpers are no-ops.
+      - no verified production wiring to configure_logging.
+    related_docs:
+      - backend/src/cce/observability/AGENTS.md
+
+  frontend:
+    path: frontend
+    purpose: >
+      Target analyst proof and stewardship UI.
+    status: planned
+    implementation:
+      entrypoints: []
+      important_components:
+        - frontend/README.md
+      owns:
+        - target browser UI
+    inputs:
+      - target backend JSON API
+    outputs:
+      - target UI
+    depends_on:
+      - HTTP adapter
+    used_by:
+      - human users
+    invariants:
+      enforced: []
+      required_but_not_fully_enforced:
+        - show OFF/ON proof and traceability
+        - steward review/approval UI
+    known_gaps:
+      - No frontend application code exists in the repository.
+    related_docs:
+      - frontend/AGENTS.md
