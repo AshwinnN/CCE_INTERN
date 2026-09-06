@@ -5,7 +5,9 @@ cryptography==50.0.1
 python-dotenv==1.2.3
 snowflake-connector-python==4.7.2
 pydantic>=2.0.0
-docling>=1.0.0
+pypdfium2>=4.30.0
+python-docx>=1.1.0
+python-pptx>=1.0.0
 paddleocr>=2.7.0
 paddlepaddle>=2.6.0
 openpyxl>=3.1.2
@@ -16,6 +18,11 @@ psycopg2-binary>=2.9.9
 grpcio>=1.64.0
 grpcio-tools>=1.64.0
 protobuf>=5.27.0
+azure-identity<2,>=1
+azure-keyvault-secrets<5,>=4
+fastapi<1,>=0.115
+uvicorn<1,>=0.30
+langchain-google-genai<3,>=2
 
 [:platform_system != "Windows"]
 python-magic>=0.4.27
@@ -25,3 +32,4 @@ python-magic-bin>=0.4.14
 
 [dev]
 pytest>=8.0.0
+httpx>=0.28.0

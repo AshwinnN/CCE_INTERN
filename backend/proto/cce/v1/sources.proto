@@ -16,6 +16,8 @@ message RegisterSourceRequest {
   string source_id = 2;
   string credential_ref = 3;
   Actor actor = 4;
+  string kind = 5;
+  string config_json = 6;
 }
 
 message TestConnectionRequest {
@@ -43,4 +45,6 @@ message IngestionStatus {
   string ingestion_run_id = 1;
   string status = 2;
   Error error = 3;
+  int32 objects_processed = 4;
+  int32 objects_failed = 5;
 }

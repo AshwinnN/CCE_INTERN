@@ -24,7 +24,7 @@ class ParserFactory:
     def _try_register(cls, mime_types, module_path, class_name):
         """Register a parser for one or more mime types, skipping it (with a
         warning, not a crash) when its optional third-party dependency isn't
-        installed. A missing OCR/Docling install must not take down every
+        installed. A missing parser install must not take down every
         other parser -- get_parser() already returns None for an unmapped
         mime type, which is the intended degrade path for this case too."""
         import importlib
@@ -49,10 +49,14 @@ class ParserFactory:
             ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-excel"],
             "cce.ingestion.parsers.excel", "ExcelParser")
         cls._try_register(
-            ["application/pdf",
-             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-             "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
-            "cce.ingestion.parsers.docling", "DoclingParser")
+            ["application/pdf"],
+            "cce.ingestion.parsers.pdf_text", "PdfTextParser")
+        cls._try_register(
+            ["application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+            "cce.ingestion.parsers.docx", "DocxParser")
+        cls._try_register(
+            ["application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+            "cce.ingestion.parsers.pptx", "PptxParser")
         cls._try_register(
             ["image/jpeg", "image/png", "image/tiff"],
             "cce.ingestion.parsers.image", "PaddleOCRParser")

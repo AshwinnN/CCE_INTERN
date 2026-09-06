@@ -443,6 +443,8 @@ def emit_to_sdk_node(state: IngestionState) -> IngestionState:
             "document_id": event["object"]["object_id"],
             "source_id": state["source_id"],
             "revision": event["object"].get("version"),
+            "source_ref": event["object"].get("source_ref") or event["object"]["object_id"],
+            "object_id": event["object"]["object_id"],
             "adapter": state["adapter"],
             "kind": state["kind"],
             "change_type": event.get("change_type"),

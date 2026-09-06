@@ -10,6 +10,9 @@ from cce.persistence.postgres.metadata_repository import PostgreSQLMetadataRepos
 from cce.persistence.postgres.migrations import initialize_control_postgres
 from cce.persistence.postgres.source_repository import PostgresSourceRepository
 from cce.runtime.service import QueryService
+from cce.sources.service import SourceService
+from cce.integrations.agentic_plane.client import AgenticPlaneClient
+from cce.integrations.agentic_plane.local_index import LocalIndexClient
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,8 @@ class Application:
     source_repository: PostgresSourceRepository
     metadata_repository: PostgreSQLMetadataRepository
     checkpoint_store: IngestionCheckpointStore
+    index_client: object
+    source_service: SourceService
     ready: bool = False
     readiness_message: str = "starting"
 
@@ -32,14 +37,31 @@ def build_application(settings: Settings) -> Application:
             timeout_seconds=settings.postgres_wait_timeout_seconds,
         )
 
+    source_repository = PostgresSourceRepository(settings.database_url)
+    metadata_repository = PostgreSQLMetadataRepository(settings.database_url)
+    checkpoint_store = IngestionCheckpointStore()
+    index_client = (
+        AgenticPlaneClient()
+        if settings.index_backend == "agentic_plane"
+        else LocalIndexClient(settings.database_url)
+    )
+    source_service = SourceService(
+        source_repository=source_repository,
+        metadata_repository=metadata_repository,
+        checkpoint_store=checkpoint_store,
+        index_client=index_client,
+    )
+
     return Application(
         settings=settings,
         query_service=QueryService(),
         governance_service=GovernanceService(),
         package_service=ContextPackageService(),
-        source_repository=PostgresSourceRepository(settings.database_url),
-        metadata_repository=PostgreSQLMetadataRepository(settings.database_url),
-        checkpoint_store=IngestionCheckpointStore(),
+        source_repository=source_repository,
+        metadata_repository=metadata_repository,
+        checkpoint_store=checkpoint_store,
+        index_client=index_client,
+        source_service=source_service,
         ready=True,
         readiness_message="ready",
     )

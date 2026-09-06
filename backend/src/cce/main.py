@@ -6,6 +6,9 @@ from cce.bootstrap import build_application
 from cce.config.settings import load_settings
 from cce.rpc.server import serve
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def _serve_http(app) -> None:
     import uvicorn

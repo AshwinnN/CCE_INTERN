@@ -2,16 +2,50 @@ import os
 import tempfile
 from typing import Iterator, Tuple
 from azure.storage.blob import BlobServiceClient
+from cce.connectors.base.source import SourceConnection, SourceConnector
 from cce.ingestion.models import DocumentMetadata
 from cce.ingestion.parsers.factory import ParserFactory
 from cce.ingestion.models import ProcessingResult, ProcessingStatus
 from cce.ingestion.change_detection.file_detection import detect_mime_type
 
-class AzureBlobSource:
-    def __init__(self, connection_string: str, container_name: str):
+class AzureBlobSource(SourceConnector):
+    def __init__(self, connection_string: str, container_name: str, source_id: str = "azure-blob"):
+        self.source_id = source_id
+        self.connection_string = connection_string
+        self.container_name = container_name
         self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
         self.container_client = self.blob_service_client.get_container_client(container_name)
-        
+
+    def connect(self) -> SourceConnection:
+        self.container_client.get_container_properties()
+        return SourceConnection(
+            connector=self,
+            connection_id=f"azure-blob:{self.container_name}",
+            source_id=self.source_id,
+            adapter="azure-blob",
+        )
+
+    def list_objects(self, cursor=None):
+        objects = []
+        for blob in self.container_client.list_blobs(name_starts_with=cursor):
+            objects.append(
+                {
+                    "object_id": blob.name,
+                    "object_type": getattr(getattr(blob, "content_settings", None), "content_type", None) or "application/octet-stream",
+                    "source_ref": f"azure://{self.container_name}/{blob.name}",
+                    "version": getattr(blob, "etag", None) or "",
+                    "content_hash": getattr(blob, "etag", None) or "",
+                    "modified_at": getattr(blob, "last_modified", None),
+                }
+            )
+        return {"objects": objects, "next_cursor": None}
+
+    def fetch_object(self, object_id: str) -> bytes:
+        return self.container_client.get_blob_client(object_id).download_blob().readall()
+
+    def close(self) -> None:
+        return None
+
     def process_blobs(self, prefix: str = None) -> Iterator[ProcessingResult]:
         blobs = self.container_client.list_blobs(name_starts_with=prefix)
         for blob in blobs:

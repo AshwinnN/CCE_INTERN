@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
-"""Contract tests for common/registry_to_structured_connect.py (Issue 2).
+"""Contract tests for cce.connectors.registry_to_structured_connect (Issue 2).
 
-Run: python3 tests/test_registry_to_structured_connect.py
+Run: pytest tests/unit/connectors/test_registry_to_structured_connect.py
 """
 import copy
 import inspect
-import os
-import sys
 import unittest
 
-REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(REPO, "common"))
-
-from registry_to_structured_connect import to_structured_connect_registry  # noqa: E402
-import registry_to_structured_connect as transform_module  # noqa: E402
+from cce.connectors.registry_to_structured_connect import to_structured_connect_registry
+import cce.connectors.registry_to_structured_connect as transform_module
 
 VALID_DESCRIPTOR = {
     "adapter": "snowflake",

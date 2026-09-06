@@ -2,7 +2,7 @@
 
 CCE (CoStrategix Context Engine) is a **governed context server**. It owns source registration, ingestion orchestration, governance, context packages, query-time reasoning, guarded structured-data access, traceability, and MCP exposure.
 
-CCE does **not** own vector storage, graph storage, embeddings, chunking, graph extraction, or retrieval infrastructure. Those capabilities are consumed through the external **AgenticPlane Python SDK**.
+CCE does **not** own the target long-term vector storage, graph storage, chunking, graph extraction, or retrieval infrastructure. Those capabilities are consumed through the external **AgenticPlane Python SDK**. For MVP synthetic proof, `cce.integrations.agentic_plane.LocalIndexClient` provides a pgvector-backed local implementation behind the same boundary; it is not a second domain/runtime architecture.
 
 ## Architecture rules
 
@@ -16,6 +16,40 @@ CCE does **not** own vector storage, graph storage, embeddings, chunking, graph 
 - Keep engineering observability separate from governance/audit traceability.
 - MCP is a thin transport adapter over the same CCE query runtime.
 - Use `pyproject.toml`; do not maintain `requirements.txt` as the primary dependency file.
+
+---
+
+## How to explore and change safely
+
+Start with `docs/IMPLEMENTATION_STATUS.md`, `docs/component-map.yaml`, this
+document, and then the nearest module `AGENTS.md`. Follow the exact entry point
+for the requested change and read outward through imports/calls only as needed.
+Code remains the source of truth when a doc and implementation disagree.
+
+For connector or parser work, avoid governance/runtime/MCP unless the public
+contract crosses that boundary. For governance, package, runtime or trace work,
+label new code as implementing a known gap rather than treating placeholder
+services as precedent. For backend-only work, do not inspect `frontend/`; it has
+no application implementation today.
+
+Treat adapter registry `status="READY"` as metadata, not proof of an executable
+connector. Verify the factory/provider implementation before relying on an
+adapter.
+
+| Change type | Start here | Avoid unless the boundary changes |
+|---|---|---|
+| Structured connector | `connectors/structured/<adapter>/`, `connectors/factory.py` | governance/runtime/MCP |
+| Parser/file type | `ingestion/parsers/`, `ParserFactory` | connector registry, runtime |
+| Structured metadata | ingestion persistence node, `persistence/ports.py`, Postgres repo/migration | frontend/MCP |
+| Proposal approval | `governance/` and governance migration/repository | provider/parser internals |
+| Package versioning | `context_packages/` and context migration/repository | source discovery |
+| Query/proof | `runtime/` plus package/governance/trace contracts | parser internals |
+| Public API | proto, transport mapping, backing service | duplicated transport business logic |
+
+High-impact files to change deliberately: `backend/proto/cce/v1/*.proto`,
+`backend/src/cce/bootstrap.py`, connector/change-event contracts, ingestion
+models/orchestrator, persistence ports/migrations/repositories, and the
+Snowflake connector read-only boundary.
 
 ---
 
@@ -385,6 +419,10 @@ CCE calls AgenticPlane through:
 backend/src/cce/integrations/agentic_plane/
 ```
 
+This package contains both the external `AgenticPlaneClient` placeholder and
+the MVP `LocalIndexClient` pgvector implementation. Callers should select one
+through bootstrap/config and keep all index/search calls behind this package.
+
 Expected responsibility split:
 
 ```text
@@ -404,7 +442,7 @@ Context ON/OFF proof
 Governance traceability
 ```
 
-CCE must not directly depend on AgenticPlane's PostgreSQL, Redis, ArcadeDB, NATS, LiteLLM, MinIO or Langfuse internals.
+CCE must not directly depend on AgenticPlane's PostgreSQL, Redis, ArcadeDB, NATS, LiteLLM, MinIO or Langfuse internals. The local pgvector index is a bounded MVP implementation of the same adapter contract, not access to AgenticPlane internals.
 
 ---
 

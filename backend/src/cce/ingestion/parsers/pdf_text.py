@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from typing import BinaryIO, Union
 
 from cce.ingestion.models import (
@@ -12,6 +13,9 @@ from cce.ingestion.models import (
     TextElement,
 )
 from cce.ingestion.parsers.base import DocumentParser
+
+
+logger = logging.getLogger(__name__)
 
 
 class PdfTextParser(DocumentParser):
@@ -27,6 +31,8 @@ class PdfTextParser(DocumentParser):
         try:
             import pypdfium2 as pdfium
 
+            metadata.parser_used = "pypdfium2"
+            metadata.parser_version = getattr(pdfium, "__version__", None)
             pdf = pdfium.PdfDocument(file_stream_or_path)
             try:
                 elements = []
@@ -55,8 +61,6 @@ class PdfTextParser(DocumentParser):
                     elements = _ocr_pdf_pages(pdf, metadata)
             finally:
                 pdf.close()
-            metadata.parser_used = "pypdfium2"
-            metadata.parser_version = getattr(pdfium, "__version__", None)
             document = CanonicalDocument(metadata=metadata, elements=elements)
             status = ProcessingStatus.SUCCESS if elements else ProcessingStatus.UNSUPPORTED
             errors = [] if elements else ["No extractable PDF text found."]
@@ -118,9 +122,13 @@ def _classify_text_block(text: str) -> ElementType:
 
 
 def _ocr_pdf_pages(pdf, metadata: DocumentMetadata):
-    import numpy as np
-    from rapidocr import RapidOCR
-    from rapidocr.utils.typings import EngineType
+    try:
+        import numpy as np
+        from rapidocr import RapidOCR
+        from rapidocr.utils.typings import EngineType
+    except ImportError as exc:
+        logger.info("PDF OCR fallback unavailable: %s", exc)
+        return []
 
     max_pages = int(os.environ.get("CCE_PDF_OCR_MAX_PAGES", "10"))
     max_elements = int(os.environ.get("CCE_PDF_OCR_MAX_ELEMENTS", "200"))

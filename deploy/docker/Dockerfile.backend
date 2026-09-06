@@ -7,10 +7,11 @@ COPY backend/proto /app/backend/proto
 COPY backend/migrations /app/backend/migrations
 COPY scripts/generate_proto.py /app/scripts/generate_proto.py
 COPY scripts/smoke_server.py /app/scripts/smoke_server.py
-RUN pip install --no-cache-dir grpcio grpcio-tools protobuf python-dotenv psycopg2-binary fastapi uvicorn \
+COPY scripts/run_api_ingestion_smoke.py /app/scripts/run_api_ingestion_smoke.py
+RUN pip install --no-cache-dir grpcio grpcio-tools protobuf python-dotenv psycopg2-binary fastapi uvicorn langgraph langchain-google-genai requests azure-storage-blob snowflake-connector-python cryptography pypdfium2 python-docx python-pptx \
     && python /app/scripts/generate_proto.py \
     && cd /app/backend \
-    && pip install --no-cache-dir --no-deps .
+    && pip install --no-cache-dir --no-build-isolation --no-deps .
 
 WORKDIR /app/backend
 

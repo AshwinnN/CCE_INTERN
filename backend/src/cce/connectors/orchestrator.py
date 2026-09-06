@@ -150,7 +150,10 @@ def connect_structured(descriptor: dict, request: ConnectorRequest, lease: dict,
 
     create = structured_connector_factory or ConnectorFactory.create
     connector = create(config)
-    trace_label = "connectors.%s.%s" % (descriptor["adapter"], type(connector).__name__)
+    trace_label = "cce.connectors.structured.%s.%s" % (
+        descriptor["adapter"],
+        type(connector).__name__,
+    )
 
     try:
         connection = connector.connect()

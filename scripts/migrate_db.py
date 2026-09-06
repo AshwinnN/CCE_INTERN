@@ -21,6 +21,9 @@ SCHEMA_FILES = [
     REPO / "backend" / "migrations" / "cce_control" / "004_context.sql",
     REPO / "backend" / "migrations" / "cce_control" / "005_runtime.sql",
     REPO / "backend" / "migrations" / "cce_control" / "006_audit.sql",
+    REPO / "backend" / "migrations" / "cce_control" / "007_source_config.sql",
+    REPO / "backend" / "migrations" / "cce_control" / "008_local_index.sql",
+    REPO / "backend" / "migrations" / "cce_control" / "009_local_index_exact_search.sql",
 ]
 
 

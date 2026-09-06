@@ -99,11 +99,13 @@ Status: **PARTIAL**
 
 Implemented:
 - provider-neutral unstructured contracts/agent path;
-- real Azure Blob SDK code in `connectors/unstructured/azure_blob/connector.py` and `connectors/fetch.py::azure_blob_fetcher()`.
+- real Azure Blob SDK code in `connectors/unstructured/azure_blob/connector.py` and `connectors/fetch.py::azure_blob_fetcher()`;
+- executable `local-fs` connector for synthetic/demo ingestion;
+- server `TestConnection` composes registered source config through `cce.sources.service.SourceService`.
 
 Missing:
-- server source TestConnection is unimplemented;
-- Azure Blob path is not a single fully wired `SourceConnector` implementation from registration through trigger.
+- production provider breadth remains limited to Snowflake and Azure Blob plus local demo files;
+- auth/authz is not enforced before source administration.
 
 ### Document discovery — DOC-02
 
@@ -111,22 +113,38 @@ Status: **PARTIAL**
 
 Implemented:
 - `AzureBlobSource.process_blobs()` lists blobs;
+- `AzureBlobSource.list_objects()` and `LocalFileSystemConnector.list_objects()` support server-triggered ingestion;
 - `UnstructuredChangeObserver` handles an object-lister result and emits change events.
 
 Missing:
-- production observer requires caller-injected listers; registry READY status is not executable provider wiring.
+- no scheduling or continuous provider polling loop;
+- registry READY status is broader than executable factory/provider support.
 
 ### Document content ingestion — DOC-03
 
 Status: **PARTIAL**
 
 Implemented:
-- real fetch, parser selection, canonical normalization, SDK-emission hook and file checkpoint in `ingestion/orchestrator.py`.
+- real fetch, parser selection, canonical normalization, SDK-emission hook and file checkpoint in `ingestion/orchestrator.py`;
+- MIME-based parsing uses text/csv/excel parsers, `pypdfium2` for PDFs, `python-docx` for Word files and `python-pptx` for PowerPoint files;
+- server `TriggerIngestion` creates an ingestion run, calls the real workflow and updates durable run state;
+- the configured AgenticPlane boundary can be the pgvector-backed `LocalIndexClient`, making synthetic ingested documents searchable.
 
 Missing:
-- server TriggerIngestion is disconnected;
-- downstream SDK emission can be a dry-run;
 - no governance proposal output.
+
+### Server source lifecycle
+
+Status: **PARTIAL**
+
+Implemented:
+- gRPC and HTTP source endpoints delegate to `cce.sources.service.SourceService`;
+- `RegisterSource` persists source kind, credential reference and non-secret config;
+- `GetIngestionStatus` reads durable run state from PostgreSQL.
+
+Missing:
+- no source scheduling/continuous change capture service;
+- no source-admin auth/authz enforcement.
 
 ### Changed-document reprocessing — DOC-04
 
@@ -227,19 +245,19 @@ The following capability IDs have no meaningful active implementation beyond con
 | SF-01 Connect to Snowflake | IMPLEMENTED | `SnowflakeConnector.connect()` via factory/ingestion | — |
 | SF-02 Discover database structure | IMPLEMENTED | `get_information_schema_card()`, `get_schema_card()` | — |
 | SF-03 Capture one sample record per table | IMPLEMENTED | `get_schema_card()` → `LIMIT 1`; production fetcher calls it | Not persisted |
-| SF-04 Store Snowflake metadata | IMPLEMENTED | `persist_structured_metadata_node()` → `PostgreSQLMetadataRepository` | Server trigger disconnected, but workflow path exists |
+| SF-04 Store Snowflake metadata | IMPLEMENTED | `persist_structured_metadata_node()` → `PostgreSQLMetadataRepository`; server source trigger calls this workflow | No sample-row persistence |
 | SF-05 Retrieve stored schema | PARTIAL | repository `list_tables/list_columns` | No active product API/runtime consumer |
 | SF-06 Retrieve stored sample records | PARTIAL | sample exists in fetched card | No sample persistence/retrieval contract |
 | SF-07 Generate candidate data query | PLANNED | `runtime/sql_generator.py` stub; SQL skill asset | No active generator |
 | SF-08 Execute approved/verified query | PARTIAL | `SnowflakeConnector.execute_query()` | Not tied to approval/verified SQL/guard |
-| DOC-01 Connect to document source | PARTIAL | Azure Blob SDK paths + unstructured connector contract | Not wired from source service end-to-end |
-| DOC-02 Discover documents | PARTIAL | Azure blob listing; observer accepts lister | production lister/change feed not composed |
-| DOC-03 Ingest document content | PARTIAL | `run_ingestion()` parse/normalize/emit/checkpoint | server trigger disconnected; downstream may dry-run |
+| DOC-01 Connect to document source | PARTIAL | Azure Blob and local-fs SourceConnector paths plus source service TestConnection | Limited provider breadth; no source-admin auth |
+| DOC-02 Discover documents | PARTIAL | Azure Blob/local-fs listing; observer accepts lister | no scheduler/continuous change feed |
+| DOC-03 Ingest document content | PARTIAL | source service trigger -> `run_ingestion()` -> configured index boundary | no governance proposal output |
 | DOC-04 Re-process changed documents | PARTIAL | change observers + idempotency | observer state in memory; provider wiring injected |
 | DOC-05 Extract traceable facts | PLANNED | no active implementation | — |
 | DOC-06 Identify entities in content | PLANNED | entity skill only | no runtime/extractor |
 | DOC-07 Identify relationships | PLANNED | no active implementation | — |
-| DOC-08 Build/update knowledge graph | PLANNED | no active graph writer | AgenticPlane adapter is stub |
+| DOC-08 Build/update knowledge graph | PLANNED | no active graph writer | local index is vector search only |
 | DOC-09 Preserve fact provenance | PARTIAL | document/change-event provenance | facts not extracted; answer lineage absent |
 | ER-01 Identify entities in question | PLANNED | `runtime/entity_resolution.py` returns `[]` | — |
 | ER-02 Candidate graph entities | PLANNED | no active graph retrieval | — |
@@ -311,8 +329,8 @@ The following capability IDs have no meaningful active implementation beyond con
 | Read-only source connectors | PARTIAL | Snowflake proven; unstructured/provider breadth largely declarative/injected. |
 | SELECT-only execution | PARTIAL | simple prefix guard exists; not called in live query method. |
 | Statement timeout / row limit | PLANNED in runtime | settings exist but execution does not enforce them. |
-| Structured ingestion | PARTIAL at product level | real workflow exists, but server trigger is not wired. |
-| Unstructured ingestion | PARTIAL | parsing/fetching works as components; source/service/index path incomplete. |
+| Structured ingestion | PARTIAL at product level | real workflow exists and server trigger is wired for Snowflake schema ingest; no downstream governance proposal. |
+| Unstructured ingestion | PARTIAL | parsing/fetching works and source trigger can index local-fs/Azure Blob content; no governance proposal. |
 | Active changed-document loop | PARTIAL | event logic exists; durable/provider wiring incomplete; no package delta/version loop. |
 | Entity extraction/resolution | PLANNED | skills/placeholders only. |
 | Semantic/policy extraction | PLANNED | skills/placeholders only. |
@@ -323,9 +341,9 @@ The following capability IDs have no meaningful active implementation beyond con
 | Context ON | PLANNED | no governed context executor. |
 | OFF vs ON comparison | PLANNED | proof function returns `{}`. |
 | Answer traceability | PLANNED | contracts exist, no builder/persistence. |
-| API boundary | PARTIAL | gRPC/HTTP exist; many operations are placeholders; no auth. |
+| API boundary | PARTIAL | gRPC/HTTP exist and source operations are wired; governance/package/query remain placeholders; no auth. |
 | MCP boundary | PLANNED | no protocol server. |
-| Workflow/service/repository separation | PARTIAL | ingestion uses clean boundaries; source RPC/HTTP write directly to repository because SourceService is missing. |
+| Workflow/service/repository separation | PARTIAL | source RPC/HTTP share SourceService; governance/package/runtime remain placeholder services. |
 
 ## Legacy / Suspected Unused
 
@@ -339,8 +357,7 @@ No capability in the supplied mapping required `UNKNOWN / REQUIRES VERIFICATION`
 
 These are **not** automatically safe to delete; they are areas where call-site evidence shows disconnection or overlap.
 
-- `backend/src/cce/ingestion/parsers/pdf_text.py::PdfTextParser` — no source/test caller found and `ParserFactory` registers Docling for PDF, not this parser.
-- `backend/src/cce/connectors/unstructured/azure_blob/connector.py::AzureBlobSource` — used by a unit test and package export, but the active ingestion fetch path uses `connectors/fetch.py::azure_blob_fetcher()` instead; two Azure Blob ingestion approaches coexist.
+- `backend/src/cce/connectors/unstructured/azure_blob/connector.py::AzureBlobSource` and `connectors/fetch.py::azure_blob_fetcher()` — both remain; the source service now uses the SourceConnector path.
 - `backend/src/cce/skills/loader.py` — current call sites found only in tests; no production module loads a skill.
 - `backend/proto/cce/v1/query.proto::ContextComparison` — message is defined but no RPC request/response field references it.
 - `backend/src/cce/persistence/postgres/checkpoint_repository.py::PostgresCheckpointRepository` — method body raises `NotImplementedError`; no call sites found.
@@ -349,4 +366,4 @@ These are **not** automatically safe to delete; they are areas where call-site e
 
 - The repository registry advertises more adapters as `READY` than have executable implementations. Treat factory/provider code, not registry metadata, as support evidence.
 - `frontend/` contains no implementation beyond a README.
-- Full test collection was not green in the analysis environment; see root `AGENTS.md` for the concrete collection/dependency and trace-label issues observed.
+- Full non-live backend tests should run with live dotenv settings disabled; live Postgres tests require a reachable `cce_control` database.

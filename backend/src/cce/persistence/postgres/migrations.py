@@ -21,6 +21,9 @@ MIGRATION_FILES = (
     "004_context.sql",
     "005_runtime.sql",
     "006_audit.sql",
+    "007_source_config.sql",
+    "008_local_index.sql",
+    "009_local_index_exact_search.sql",
 )
 
 
@@ -63,7 +66,16 @@ def apply_control_schema(dsn: str) -> None:
         conn.autocommit = False
         with conn.cursor() as cur:
             for path in migration_paths():
-                cur.execute(path.read_text(encoding="utf-8"))
+                try:
+                    cur.execute(path.read_text(encoding="utf-8"))
+                except psycopg2.Error as exc:
+                    if path.name == "008_local_index.sql":
+                        raise RuntimeError(
+                            "pgvector extension is required for local indexing. "
+                            "Install pgvector on the target Postgres instance or "
+                            "set CCE_INDEX_BACKEND=agentic_plane."
+                        ) from exc
+                    raise
         conn.commit()
 
 

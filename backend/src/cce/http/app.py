@@ -19,6 +19,8 @@ class RegisterSourceBody(BaseModel):
     adapter: str
     source_id: str
     credential_ref: str = ""
+    kind: str = ""
+    config: dict[str, Any] = Field(default_factory=dict)
     actor: ActorModel = Field(default_factory=ActorModel)
 
 
@@ -47,40 +49,26 @@ def create_app(app_context: Any) -> FastAPI:
 
     @http_app.post("/sources")
     def register_source(body: RegisterSourceBody):
-        source_id = app_context.source_repository.save_source(
+        result = app_context.source_service.register_source(
             adapter=body.adapter,
             source_id=body.source_id,
             credential_ref=body.credential_ref,
+            kind=body.kind or None,
+            config=body.config,
         )
-        return {"source_id": source_id, "status": "REGISTERED"}
+        return _source_result(result)
 
     @http_app.post("/sources/{source_id}/test")
     def test_connection(source_id: str, body: ActorBody | None = None):
-        return {
-            "source_id": source_id,
-            "status": "NOT_CONFIGURED",
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "Connection testing is not implemented in the server foundation.",
-                "retryable": False,
-            },
-        }
+        return _source_result(app_context.source_service.test_connection(source_id))
 
     @http_app.post("/sources/{source_id}/ingest")
     def trigger_ingestion(source_id: str, body: ActorBody | None = None):
-        return {
-            "ingestion_run_id": "",
-            "status": "NOT_STARTED",
-            "error": {
-                "code": "NOT_IMPLEMENTED",
-                "message": "Ingestion triggering is not implemented in the server foundation.",
-                "retryable": False,
-            },
-        }
+        return _run_result(app_context.source_service.trigger_ingestion(source_id))
 
     @http_app.get("/ingestion-runs/{run_id}")
     def ingestion_status(run_id: str):
-        return {"ingestion_run_id": run_id, "status": "UNKNOWN"}
+        return _run_result(app_context.source_service.get_ingestion_status(run_id))
 
     @http_app.get("/proposals")
     def list_proposals():
@@ -134,3 +122,22 @@ def create_app(app_context: Any) -> FastAPI:
         }
 
     return http_app
+
+
+def _source_result(result) -> dict:
+    payload = {"source_id": result.source_id, "status": result.status}
+    if result.error:
+        payload["error"] = result.error
+    return payload
+
+
+def _run_result(result) -> dict:
+    payload = {
+        "ingestion_run_id": result.ingestion_run_id,
+        "status": result.status,
+        "objects_processed": result.objects_processed,
+        "objects_failed": result.objects_failed,
+    }
+    if result.error:
+        payload["error"] = result.error
+    return payload

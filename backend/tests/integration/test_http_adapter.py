@@ -9,8 +9,27 @@ from cce.runtime.service import QueryResponse
 def test_http_adapter_health_sources_and_query():
     app_context = SimpleNamespace(
         ready=True,
-        source_repository=SimpleNamespace(
-            save_source=lambda adapter, source_id, credential_ref: "source-123"
+        source_service=SimpleNamespace(
+            register_source=lambda adapter, source_id, credential_ref, kind, config: SimpleNamespace(
+                source_id="source-123", status="REGISTERED", error=None
+            ),
+            test_connection=lambda source_id: SimpleNamespace(
+                source_id=source_id, status="CONNECTED", error=None
+            ),
+            trigger_ingestion=lambda source_id: SimpleNamespace(
+                ingestion_run_id="run-1",
+                status="RUNNING",
+                error=None,
+                objects_processed=0,
+                objects_failed=0,
+            ),
+            get_ingestion_status=lambda run_id: SimpleNamespace(
+                ingestion_run_id=run_id,
+                status="SUCCESS",
+                error=None,
+                objects_processed=1,
+                objects_failed=0,
+            ),
         ),
         query_service=SimpleNamespace(
             query=lambda request: QueryResponse(
@@ -27,8 +46,30 @@ def test_http_adapter_health_sources_and_query():
     assert client.get("/health").json() == {"status": "SERVING"}
     assert client.post(
         "/sources",
-        json={"adapter": "snowflake", "source_id": "abc", "credential_ref": "env://X"},
+        json={
+            "adapter": "snowflake",
+            "source_id": "abc",
+            "credential_ref": "env://X",
+            "kind": "structured",
+            "config": {"schema": "PUBLIC"},
+        },
     ).json() == {"source_id": "source-123", "status": "REGISTERED"}
+    assert client.post("/sources/source-123/test", json={}).json() == {
+        "source_id": "source-123",
+        "status": "CONNECTED",
+    }
+    assert client.post("/sources/source-123/ingest", json={}).json() == {
+        "ingestion_run_id": "run-1",
+        "status": "RUNNING",
+        "objects_processed": 0,
+        "objects_failed": 0,
+    }
+    assert client.get("/ingestion-runs/run-1").json() == {
+        "ingestion_run_id": "run-1",
+        "status": "SUCCESS",
+        "objects_processed": 1,
+        "objects_failed": 0,
+    }
     assert client.post("/query", json={"question": "hello"}).json() == {
         "answer": "ok",
         "trace_id": "trace-1",

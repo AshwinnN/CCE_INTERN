@@ -87,8 +87,8 @@ class RoutingTests(unittest.TestCase):
         agent = make_agent()
         snow = agent.handle(make_request(source_adapter="snowflake"))
         pg = agent.handle(make_request(source_adapter="postgres", credential_ref="vault://cce/pg"))
-        snow_connect = [t.skill for t in snow.skill_trace if t.skill.startswith("connectors.")]
-        pg_connect = [t.skill for t in pg.skill_trace if t.skill.startswith("connectors.")]
+        snow_connect = [t.skill for t in snow.skill_trace if t.skill.startswith("cce.connectors.structured.")]
+        pg_connect = [t.skill for t in pg.skill_trace if t.skill.startswith("cce.connectors.structured.")]
         self.assertEqual(len(snow_connect), 1)
         self.assertEqual(len(pg_connect), 1)
         # Both traces are handled by the identical FakeStructuredConnector

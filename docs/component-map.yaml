@@ -28,20 +28,19 @@ modules:
       - JSON responses
     depends_on:
       - bootstrap/Application
+      - source service
       - runtime service
       - governance service
       - context package service
-      - source repository
     used_by:
       - external clients
     invariants:
       enforced:
         - gRPC and HTTP delegate to shared Application objects
+        - source ingestion triggers call the shared source service
       required_but_not_fully_enforced:
         - authentication and authorization before service execution
-        - source ingestion trigger invokes the real ingestion workflow
     known_gaps:
-      - Source TestConnection/TriggerIngestion/GetIngestionStatus are placeholders.
       - Governance/package/query transports delegate to placeholder services.
       - gRPC auth/authz interceptors are empty and not registered.
     related_docs:
@@ -61,6 +60,8 @@ modules:
         - backend/src/cce/connectors/factory.py:ConnectorFactory.create
       important_components:
         - backend/src/cce/connectors/structured/snowflake/connector.py:SnowflakeConnector
+        - backend/src/cce/connectors/unstructured/local_fs/connector.py:LocalFileSystemConnector
+        - backend/src/cce/connectors/unstructured/azure_blob/connector.py:AzureBlobSource
         - backend/src/cce/connectors/fetch.py:snowflake_schema_fetcher
         - backend/src/cce/connectors/fetch.py:azure_blob_fetcher
         - backend/src/cce/connectors/registry.py:StubAdapterRegistryProvider
@@ -92,7 +93,7 @@ modules:
     known_gaps:
       - Structured factory implements only Snowflake despite broader READY registry entries.
       - Observation provider listers are caller-injected and observation checkpoint/dedup stores are in-memory.
-      - Azure Blob implementation is split between AzureBlobSource and fetch helper paths.
+      - Azure Blob has both a SourceConnector path and an older fetch-helper path.
     related_docs:
       - backend/src/cce/connectors/AGENTS.md
 
@@ -109,6 +110,9 @@ modules:
       important_components:
         - backend/src/cce/ingestion/orchestrator.py:build_ingestion_workflow
         - backend/src/cce/ingestion/parsers/factory.py:ParserFactory
+        - backend/src/cce/ingestion/parsers/pdf_text.py:PdfTextParser
+        - backend/src/cce/ingestion/parsers/docx.py:DocxParser
+        - backend/src/cce/ingestion/parsers/pptx.py:PptxParser
         - backend/src/cce/ingestion/normalizers/document.py:normalize_to_canonical
         - backend/src/cce/ingestion/checkpoint.py:IngestionCheckpointStore
       owns:
@@ -128,25 +132,75 @@ modules:
       - connectors
       - persistence
       - security.dlp
+      - pypdfium2 for PDF text extraction
+      - python-docx for Word document extraction
+      - python-pptx for PowerPoint extraction
     used_by:
-      - callable ingestion service only; source RPC/HTTP trigger is not wired
+      - source service
+      - callable ingestion service
     invariants:
       enforced:
         - structured snapshots are written as new snapshot IDs
         - parser selection is MIME-based through ParserFactory
+        - PDF, DOCX and PPTX parsers are registered independently so one missing dependency degrades only its own format
       required_but_not_fully_enforced:
         - real DLP/PII redaction
         - entitlement capture
         - proposals are created instead of directly serving content
-        - durable downstream index/graph write
+        - durable graph write
     known_gaps:
       - DLP implementation is a no-op stub.
       - CCE_SDK_ENDPOINT absence is treated as successful dry-run emission.
       - No governance proposal creation follows ingestion.
-      - Server TriggerIngestion does not call this module.
+      - PDF parsing is text-block extraction with best-effort OCR fallback, not table/layout extraction.
     related_docs:
       - backend/src/cce/ingestion/AGENTS.md
       - backend/src/cce/ingestion/FLOW.md
+
+  sources:
+    path: backend/src/cce/sources
+    purpose: >
+      Compose registered source configuration, provider connectors, ingestion
+      orchestration and ingestion-run state for gRPC and HTTP source operations.
+    status: partial
+    implementation:
+      entrypoints:
+        - backend/src/cce/sources/service.py:SourceService
+      important_components:
+        - backend/src/cce/sources/service.py:SourceService.register_source
+        - backend/src/cce/sources/service.py:SourceService.test_connection
+        - backend/src/cce/sources/service.py:SourceService.trigger_ingestion
+        - backend/src/cce/sources/service.py:SourceService.get_ingestion_status
+      owns:
+        - source service orchestration
+        - ingestion run lifecycle
+    inputs:
+      - registered source configuration
+      - credential references
+    outputs:
+      - source operation status
+      - ingestion run status
+      - downstream index payloads through the AgenticPlane boundary
+    depends_on:
+      - connectors
+      - ingestion.orchestrator
+      - persistence
+      - integrations.agentic_plane
+    used_by:
+      - gRPC source service
+      - HTTP source endpoints
+    invariants:
+      enforced:
+        - transports share one source service path
+        - ingestion is emitted through the configured AgenticPlane boundary
+      required_but_not_fully_enforced:
+        - auth/authz before source administration
+        - provider breadth beyond Snowflake, Azure Blob and local-fs
+    known_gaps:
+      - No scheduling or continuous source polling loop.
+      - No governance proposal creation after indexing.
+    related_docs:
+      - docs/architecture/ingestion-flow.md
 
   persistence:
     path: backend/src/cce/persistence
@@ -162,11 +216,15 @@ modules:
         - backend/src/cce/persistence/ports.py:MetadataRepository
         - backend/migrations/cce_control/001_registry.sql
         - backend/migrations/cce_control/002_metadata.sql
+        - backend/migrations/cce_control/007_source_config.sql
+        - backend/migrations/cce_control/008_local_index.sql
       owns:
         - cce_control persistence contracts and implementations
     inputs:
       - source registration
       - schema snapshots/tables/columns/constraints/relationships
+      - ingestion run state
+      - local index chunks
     outputs:
       - durable PostgreSQL state
     depends_on:
@@ -174,7 +232,7 @@ modules:
     used_by:
       - bootstrap
       - ingestion
-      - source RPC/HTTP registration
+      - source service
     invariants:
       enforced:
         - structured snapshot rows are snapshot-scoped and deterministic entity IDs are used.
@@ -183,7 +241,7 @@ modules:
     known_gaps:
       - Governance/context/runtime/audit migrations contain schemas only.
       - PostgresCheckpointRepository is not implemented.
-      - Source repository stores credential_ref in cce_source.display_name and has no read/list method.
+      - The local index requires the pgvector extension when CCE_INDEX_BACKEND=local.
     related_docs:
       - backend/src/cce/persistence/AGENTS.md
       - docs/decisions/ADR-002-cce-control-postgres.md
@@ -400,8 +458,10 @@ modules:
     implementation:
       entrypoints:
         - backend/src/cce/integrations/llm/client.py:complete
+        - backend/src/cce/integrations/agentic_plane/local_index.py:LocalIndexClient
         - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.retrieve
-      important_components: []
+      important_components:
+        - backend/src/cce/integrations/agentic_plane/base.py:AgenticPlaneBoundary
       owns:
         - external SDK/model adapter boundary
     inputs:
@@ -409,19 +469,24 @@ modules:
       - retrieval questions
     outputs:
       - LLM text
-      - target retrieval results
+      - retrieval/search results
+      - index operation results
     depends_on:
       - Google Gemini LangChain package
+      - pgvector when local indexing is enabled
     used_by:
       - runtime.retrieval uses AgenticPlane placeholder
+      - source service uses the configured index boundary
     invariants:
       enforced:
         - Gemini temperature is set to zero
+        - local indexing/search stays behind the AgenticPlane boundary
       required_but_not_fully_enforced:
         - AgenticPlane accessed only through adapter
         - runtime uses the configured LLM where agentic reasoning is required
     known_gaps:
-      - AgenticPlane retrieve always returns an empty list.
+      - AgenticPlaneClient external-SDK implementation is still a placeholder.
+      - LocalIndexClient implements exact vector search only, not ANN indexing or graph operations; MVP data volumes favor deterministic exact nearest-neighbor behavior over ivfflat tuning.
       - Gemini client has no production call site.
     related_docs:
       - backend/src/cce/integrations/AGENTS.md

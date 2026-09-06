@@ -20,6 +20,7 @@ class Settings:
     readiness_message: str = "starting"
     http_enabled: bool = True
     http_port: int = 8080
+    index_backend: str = "local"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -78,4 +79,5 @@ def load_settings() -> Settings:
         ),
         http_enabled=_bool_env("CCE_HTTP_ENABLED", True),
         http_port=int(os.environ.get("CCE_HTTP_PORT", "8080")),
+        index_backend=os.environ.get("CCE_INDEX_BACKEND", "local"),
     )

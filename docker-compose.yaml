@@ -1,7 +1,7 @@
 services:
   postgres:
     container_name: cce-control-postgres
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: cce_admin
       POSTGRES_PASSWORD: cce_password
@@ -32,6 +32,8 @@ services:
       CCE_MIGRATION_DIR: /app/backend/migrations/cce_control
       CCE_POSTGRES_WAIT_TIMEOUT_SECONDS: "60"
       CCE_CHECKPOINT_STORE_PATH: /app/.ingestion_checkpoints
+      CCE_INDEX_BACKEND: local
+      CCE_LOCAL_INDEX_EMBEDDING_MODE: hash
     ports:
       - "50051:50051"
       - "8080:8080"
