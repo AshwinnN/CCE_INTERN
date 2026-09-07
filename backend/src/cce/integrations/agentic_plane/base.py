@@ -15,5 +15,12 @@ class AgenticPlaneBoundary(Protocol):
     def delete(self, document_id: str) -> dict:
         """Delete indexed content for a document."""
 
-    def graph(self, *args, **kwargs):
-        """Graph operations are deferred."""
+    def graph(
+        self,
+        query: str,
+        *,
+        agent_id: str | None = None,
+        depth: int = 2,
+        limit: int = 10,
+    ) -> dict:
+        """Return backend-neutral GraphRAG data for a natural-language query."""

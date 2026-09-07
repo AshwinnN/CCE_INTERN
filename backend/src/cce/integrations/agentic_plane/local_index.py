@@ -11,6 +11,7 @@ import psycopg2
 import psycopg2.extras
 
 from cce.integrations.agentic_plane.chunking import payload_chunks as _payload_chunks
+from cce.integrations.agentic_plane.errors import GraphNotSupportedError
 
 
 DEFAULT_EMBEDDING_MODEL = "models/text-embedding-004"
@@ -71,7 +72,8 @@ class LocalIndexClient:
                 cur.execute("SET LOCAL enable_bitmapscan = off")
                 cur.execute(
                     """
-                    SELECT document_id, chunk_text, source_id::text AS source_id,
+                    SELECT chunk_id::text AS memory_id, document_id, chunk_text,
+                           source_id::text AS source_id,
                            source_ref, version, object_id, trace_id, metadata,
                            embedding <=> %s::vector AS distance
                     FROM cce_local_index_chunk
@@ -84,6 +86,7 @@ class LocalIndexClient:
         # Boundary convention: score is cosine similarity, so higher is better.
         return [
             {
+                "memory_id": row["memory_id"],
                 "document_id": row["document_id"],
                 "chunk_text": row["chunk_text"],
                 "source_id": row["source_id"],
@@ -111,8 +114,17 @@ class LocalIndexClient:
                 conn.commit()
         return {"status": "deleted", "deleted": deleted}
 
-    def graph(self, *args, **kwargs):
-        raise NotImplementedError("local graph operations are not implemented")
+    def graph(
+        self,
+        query: str,
+        *,
+        agent_id: str | None = None,
+        depth: int = 2,
+        limit: int = 10,
+    ) -> dict:
+        raise GraphNotSupportedError(
+            "graph retrieval is unsupported on the local index backend"
+        )
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         if self._embed_texts is not None:

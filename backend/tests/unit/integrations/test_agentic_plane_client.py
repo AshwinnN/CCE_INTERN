@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
+import pytest
+
 from cce.integrations.agentic_plane.client import AgenticPlaneClient
+from cce.integrations.agentic_plane.errors import GraphExtractionError
 
 
 class FakeMemory:
@@ -23,9 +26,30 @@ class FakeMemory:
         return self.search_result
 
 
+class FakeGraph:
+    def __init__(self):
+        self.extractions = []
+        self.search_calls = []
+        self.search_result = SimpleNamespace(
+            entities=[], relationships=[], memories=[]
+        )
+
+    def extract_and_store(self, *, content, agent_id, memory_id):
+        self.extractions.append((content, agent_id, memory_id))
+        return SimpleNamespace(
+            entities=[SimpleNamespace(entity_id="entity-" + memory_id)],
+            relationships=[SimpleNamespace(relationship_id="rel-" + memory_id)],
+        )
+
+    def graphrag_search(self, query, *, agent_id, depth, limit):
+        self.search_calls.append((query, agent_id, depth, limit))
+        return self.search_result
+
+
 class FakePlane:
     def __init__(self):
         self.memory = FakeMemory()
+        self.graph = FakeGraph()
         self.closed = False
 
     def close(self):
@@ -109,7 +133,12 @@ def test_index_maps_raw_chunks_and_provenance_and_persists_ids():
             "max_retries": 4,
         }
     ]
-    assert result == {"status": "indexed", "indexed": 2}
+    assert result == {
+        "status": "indexed",
+        "indexed": 2,
+        "entities_extracted": 2,
+        "relationships_extracted": 2,
+    }
     assert [item["content"] for item in plane.memory.stored_items] == [
         "raw block text",
         "raw cell text",
@@ -141,6 +170,10 @@ def test_index_maps_raw_chunks_and_provenance_and_persists_ids():
             "trace_id": payload["trace_id"],
         }
     ]
+    assert plane.graph.extractions == [
+        ("raw block text", "cce-ingestion", "memory-0"),
+        ("raw cell text", "cce-ingestion", "memory-1"),
+    ]
 
 
 def test_reindex_and_deleted_payload_delete_each_bridged_memory():
@@ -160,7 +193,12 @@ def test_reindex_and_deleted_payload_delete_each_bridged_memory():
         }
     )
 
-    assert result == {"status": "indexed", "indexed": 1}
+    assert result == {
+        "status": "indexed",
+        "indexed": 1,
+        "entities_extracted": 1,
+        "relationships_extracted": 1,
+    }
     assert plane.memory.deleted[:2] == [
         ("old-1", "original-agent"),
         ("old-2", "original-agent"),
@@ -179,6 +217,7 @@ def test_search_maps_memory_record_to_backend_neutral_shape():
     plane.memory.search_result = SimpleNamespace(
         results=[
             SimpleNamespace(
+                memory_id="memory-1",
                 content="matched raw text",
                 score=0.91,
                 metadata={
@@ -201,6 +240,7 @@ def test_search_maps_memory_record_to_backend_neutral_shape():
     assert plane.memory.search_calls == [("cce-ingestion", "matched", 3)]
     assert hits == [
         {
+            "memory_id": "memory-1",
             "document_id": "doc-1",
             "chunk_text": "matched raw text",
             "source_id": "source-1",
@@ -219,3 +259,77 @@ def test_search_maps_memory_record_to_backend_neutral_shape():
     client.close()
     client.close()
     assert plane.closed is True
+
+
+def test_graph_maps_sdk_result_without_synthesis():
+    plane = FakePlane()
+    bridge = FakeBridge()
+    plane.graph.search_result = SimpleNamespace(
+        entities=[
+            SimpleNamespace(
+                entity_id="ent-1",
+                name="Ada Lovelace",
+                entity_type="Person",
+                source_memories=["memory-1"],
+            )
+        ],
+        relationships=[
+            SimpleNamespace(
+                relationship_id="rel-1",
+                source_entity_id="ent-1",
+                target_entity_id="ent-2",
+                relation_type="WORKED_ON",
+                weight=0.8,
+            )
+        ],
+        memories=[SimpleNamespace(memory_id="memory-1", content="Ada", score=0.7)],
+    )
+    client = _client(plane, bridge)
+
+    result = client.graph("Who worked on it?", depth=3, limit=4)
+
+    assert plane.graph.search_calls == [
+        ("Who worked on it?", "cce-ingestion", 3, 4)
+    ]
+    assert result == {
+        "entities": [
+            {
+                "entity_id": "ent-1",
+                "name": "Ada Lovelace",
+                "entity_type": "Person",
+                "source_memories": ["memory-1"],
+            }
+        ],
+        "relationships": [
+            {
+                "relationship_id": "rel-1",
+                "source_entity_id": "ent-1",
+                "target_entity_id": "ent-2",
+                "relation_type": "WORKED_ON",
+                "weight": 0.8,
+            }
+        ],
+        "memories": [{"memory_id": "memory-1", "content": "Ada", "score": 0.7}],
+    }
+
+
+def test_index_surfaces_graph_failure_after_persisting_memory_reference():
+    plane = FakePlane()
+    bridge = FakeBridge()
+
+    def fail_extraction(**kwargs):
+        raise RuntimeError("graph disabled")
+
+    plane.graph.extract_and_store = fail_extraction
+    client = _client(plane, bridge)
+
+    with pytest.raises(GraphExtractionError, match="GRAPH_ENABLED"):
+        client.index(
+            {
+                "document_id": "doc-1",
+                "source_id": "source-1",
+                "blocks": [{"id": "b1", "type": "text", "text": "Ada built it"}],
+            }
+        )
+
+    assert bridge.saved[0]["memory_ids"] == ["memory-0"]

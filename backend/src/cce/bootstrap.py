@@ -10,6 +10,7 @@ from cce.persistence.postgres.metadata_repository import PostgreSQLMetadataRepos
 from cce.persistence.postgres.migrations import initialize_control_postgres
 from cce.persistence.postgres.source_repository import PostgresSourceRepository
 from cce.runtime.service import QueryService
+from cce.retrieval.service import RetrievalService
 from cce.sources.service import SourceService
 from cce.integrations.agentic_plane.client import AgenticPlaneClient
 from cce.integrations.agentic_plane.local_index import LocalIndexClient
@@ -25,6 +26,7 @@ class Application:
     metadata_repository: PostgreSQLMetadataRepository
     checkpoint_store: IngestionCheckpointStore
     index_client: object
+    retrieval_service: RetrievalService
     source_service: SourceService
     ready: bool = False
     readiness_message: str = "starting"
@@ -63,6 +65,10 @@ def build_application(settings: Settings) -> Application:
         checkpoint_store=checkpoint_store,
         index_client=index_client,
     )
+    retrieval_service = RetrievalService(
+        index_client=index_client,
+        backend=settings.index_backend,
+    )
 
     return Application(
         settings=settings,
@@ -73,6 +79,7 @@ def build_application(settings: Settings) -> Application:
         metadata_repository=metadata_repository,
         checkpoint_store=checkpoint_store,
         index_client=index_client,
+        retrieval_service=retrieval_service,
         source_service=source_service,
         ready=True,
         readiness_message="ready",

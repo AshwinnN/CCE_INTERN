@@ -11,8 +11,8 @@ Capability classification across those 76 rows:
 | Status | Count |
 |---|---:|
 | IMPLEMENTED | 4 |
-| PARTIAL | 13 |
-| PLANNED | 59 |
+| PARTIAL | 16 |
+| PLANNED | 56 |
 | LEGACY / UNUSED | 0 |
 | UNKNOWN / REQUIRES VERIFICATION | 0 |
 
@@ -131,12 +131,35 @@ Implemented:
 - the configured AgenticPlane boundary can be the SDK-backed `AgenticPlaneClient`
   for hosted writes or the pgvector-backed `LocalIndexClient` fallback;
 - the hosted path sends raw chunks to `memory.store_batch()`, persists returned
-  IDs in `cce_agentic_plane_memory`, and supports document replacement/deletion.
+  IDs in `cce_agentic_plane_memory`, synchronously extracts graph data per
+  memory, and supports document replacement/deletion;
+- the separate raw `POST /retrieve` and `RetrievalService.Retrieve` surfaces
+  return direct memory-search and GraphRAG records with a request trace ID.
 
 Missing:
 - no governance proposal output.
-- the governed runtime read/context-assembly path is not wired, and graph/entity
-  extraction remains unimplemented.
+- the governed `/query` runtime read/context-assembly path is not wired; raw
+  retrieval does not provide governance, packages or answer synthesis.
+
+### Raw AgenticPlane graph proof — DOC-06, DOC-07, DOC-08
+
+Status: **PARTIAL** at product capability level; executable for raw hosted
+retrieval when AgenticPlane graph services are enabled.
+
+Implemented:
+- ingestion calls synchronous `graph.extract_and_store()` once per stored
+  memory and reports entity/relationship response counts;
+- `AgenticPlaneClient.graph()` maps `graphrag_search()` results without
+  synthesis;
+- `/retrieve` and the equivalent gRPC RPC return memory and graph records with
+  traceable source metadata;
+- local fallback returns memory results plus an explicit graph-unsupported
+  marker.
+
+Boundary:
+- AgenticPlane must run with `GRAPH_ENABLED=true` and ArcadeDB available;
+- this is not entity resolution, governed context, package construction or the
+  governed `/query` runtime.
 
 ### Server source lifecycle
 
@@ -232,9 +255,6 @@ The following capability IDs have no meaningful active implementation beyond con
 
 - **SF-07** Generate a candidate data query from stored schema.
 - **DOC-05** Extract traceable facts from a document.
-- **DOC-06** Identify entities in document content.
-- **DOC-07** Identify relationships between extracted facts/entities.
-- **DOC-08** Build/update the knowledge graph.
 - **ER-01..ER-07** question/graph/Snowflake entity identification and resolution, ambiguity/unresolved handling.
 - **CTX-01..CTX-10** business concept/definition/value/policy extraction, linkage, semantic mapping, query mapping, verified SQL generation.
 - **GOV-01..GOV-09** proposal creation, display/evidence/provenance, approve/reject, approver/timestamp/validity persistence.
@@ -260,9 +280,9 @@ The following capability IDs have no meaningful active implementation beyond con
 | DOC-03 Ingest document content | PARTIAL | source service trigger -> `run_ingestion()` -> configured index boundary | no governance proposal output |
 | DOC-04 Re-process changed documents | PARTIAL | change observers + idempotency | observer state in memory; provider wiring injected |
 | DOC-05 Extract traceable facts | PLANNED | no active implementation | — |
-| DOC-06 Identify entities in content | PLANNED | entity skill only | no runtime/extractor |
-| DOC-07 Identify relationships | PLANNED | no active implementation | — |
-| DOC-08 Build/update knowledge graph | PLANNED | no active graph writer | local index is vector search only |
+| DOC-06 Identify entities in content | PARTIAL | hosted ingestion synchronously calls AgenticPlane extraction per memory | external extraction only; no governed proposal/entity-resolution flow |
+| DOC-07 Identify relationships | PARTIAL | AgenticPlane extraction returns stored relationships | external extraction only; no governed fact-linking flow |
+| DOC-08 Build/update knowledge graph | PARTIAL | SDK graph write and raw GraphRAG retrieval are active behind the boundary | requires hosted graph services; local backend has no graph |
 | DOC-09 Preserve fact provenance | PARTIAL | document/change-event provenance | facts not extracted; answer lineage absent |
 | ER-01 Identify entities in question | PLANNED | `runtime/entity_resolution.py` returns `[]` | — |
 | ER-02 Candidate graph entities | PLANNED | no active graph retrieval | — |
@@ -337,7 +357,7 @@ The following capability IDs have no meaningful active implementation beyond con
 | Structured ingestion | PARTIAL at product level | real workflow exists and server trigger is wired for Snowflake schema ingest; no downstream governance proposal. |
 | Unstructured ingestion | PARTIAL | parsing/fetching works and source trigger can index local-fs/Azure Blob content; no governance proposal. |
 | Active changed-document loop | PARTIAL | event logic exists; durable/provider wiring incomplete; no package delta/version loop. |
-| Entity extraction/resolution | PLANNED | skills/placeholders only. |
+| Entity extraction/resolution | PARTIAL | raw hosted AgenticPlane extraction/GraphRAG works; governed entity resolution remains unbuilt. |
 | Semantic/policy extraction | PLANNED | skills/placeholders only. |
 | Verified SQL generation/storage | PLANNED | model/skill only. |
 | Package construction/version persistence | PLANNED | helper-only partial version increment. |
@@ -346,7 +366,7 @@ The following capability IDs have no meaningful active implementation beyond con
 | Context ON | PLANNED | no governed context executor. |
 | OFF vs ON comparison | PLANNED | proof function returns `{}`. |
 | Answer traceability | PLANNED | contracts exist, no builder/persistence. |
-| API boundary | PARTIAL | gRPC/HTTP exist and source operations are wired; governance/package/query remain placeholders; no auth. |
+| API boundary | PARTIAL | gRPC/HTTP source operations and raw retrieval are wired; governance/package/query remain placeholders; no auth. |
 | MCP boundary | PLANNED | no protocol server. |
 | Workflow/service/repository separation | PARTIAL | source RPC/HTTP share SourceService; governance/package/runtime remain placeholder services. |
 

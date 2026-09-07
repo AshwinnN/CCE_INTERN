@@ -18,6 +18,8 @@ modules:
         - backend/src/cce/rpc/services/health_service.py:HealthService
         - backend/src/cce/rpc/services/source_service.py:SourceRPCService
         - backend/src/cce/rpc/services/query_service.py:QueryRPCService
+        - backend/src/cce/rpc/services/retrieval_service.py:RetrievalRPCService
+        - backend/src/cce/http/app.py:POST /retrieve
       owns:
         - transport mapping
         - server registration
@@ -30,6 +32,7 @@ modules:
       - bootstrap/Application
       - source service
       - runtime service
+      - retrieval service
       - governance service
       - context package service
     used_by:
@@ -38,10 +41,12 @@ modules:
       enforced:
         - gRPC and HTTP delegate to shared Application objects
         - source ingestion triggers call the shared source service
+        - raw retrieval transports call the shared RetrievalService
       required_but_not_fully_enforced:
         - authentication and authorization before service execution
     known_gaps:
       - Governance/package/query transports delegate to placeholder services.
+      - Raw retrieval is not authenticated or governed and intentionally does not use QueryService.
       - gRPC auth/authz interceptors are empty and not registered.
     related_docs:
       - backend/src/cce/rpc/AGENTS.md
@@ -464,6 +469,7 @@ modules:
         - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.index
         - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.search
         - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.delete
+        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.graph
       important_components:
         - backend/src/cce/integrations/agentic_plane/base.py:AgenticPlaneBoundary
         - backend/src/cce/integrations/agentic_plane/bridge.py:AgenticPlaneMemoryBridge
@@ -477,13 +483,16 @@ modules:
       - LLM text
       - retrieval/search results
       - index operation results
+      - synchronous graph extraction and GraphRAG results
     depends_on:
       - Google Gemini LangChain package
       - pgvector when local indexing is enabled
       - AgenticPlane Python SDK when hosted indexing is enabled
       - cce_agentic_plane_memory bridge table
+      - AgenticPlane GRAPH_ENABLED=true and ArcadeDB for hosted graph operations
     used_by:
       - source service uses the configured index boundary for ingestion writes
+      - retrieval service uses the configured boundary for raw search and graph reads
       - runtime.retrieval has a legacy adapter-specific seam but no active governed read path
     invariants:
       enforced:
@@ -491,18 +500,53 @@ modules:
         - local indexing/search stays behind the AgenticPlane boundary
         - hosted writes send raw text for server-side embedding
         - hosted memory IDs are retained in the CCE-owned bridge table
+        - hosted graph extraction is synchronous per memory and links the returned memory ID
+        - graph failures surface as ingestion errors
         - search scores use cosine similarity, with higher values ranked better
       required_but_not_fully_enforced:
         - AgenticPlane accessed only through adapter
         - runtime uses the configured LLM where agentic reasoning is required
     known_gaps:
-      - AgenticPlane graph/entity extraction is not implemented.
       - The governed runtime read/context-assembly path is not wired to boundary search.
-      - LocalIndexClient implements exact vector search only, not ANN indexing or graph operations; MVP data volumes favor deterministic exact nearest-neighbor behavior over ivfflat tuning.
+      - LocalIndexClient implements exact vector search only, not ANN indexing or graph operations; graph calls raise GraphNotSupportedError and raw retrieval marks them unsupported.
       - Gemini client has no production call site.
     related_docs:
       - backend/src/cce/integrations/AGENTS.md
       - docs/decisions/ADR-003-agentic-plane-boundary.md
+
+  retrieval:
+    path: backend/src/cce/retrieval
+    purpose: >
+      Provide a raw, non-governed memory plus GraphRAG retrieval proof over the configured index boundary.
+    status: implemented
+    implementation:
+      entrypoints:
+        - backend/src/cce/retrieval/service.py:RetrievalService.retrieve
+        - backend/src/cce/http/app.py:POST /retrieve
+        - backend/proto/cce/v1/retrieval.proto:RetrievalService.Retrieve
+    owns:
+      - raw retrieval request trace IDs
+      - direct boundary-result response mapping
+    inputs:
+      - natural-language question
+      - result limit and graph depth
+    outputs:
+      - memory records with provenance
+      - GraphRAG entities, relationships and memory references
+    depends_on:
+      - integrations.agentic_plane boundary
+    used_by:
+      - HTTP and gRPC transport adapters
+    invariants:
+      enforced:
+        - no answer synthesis or provider-result paraphrasing
+        - local graph absence is explicitly marked unsupported
+        - no dependency on QueryService, governance or context packages
+      required_but_not_fully_enforced:
+        - transport authentication and authorization
+    known_gaps:
+      - This proof is deliberately outside the governed Context ON/OFF runtime.
+      - Hosted graph availability is deployment-controlled by AgenticPlane GRAPH_ENABLED and ArcadeDB.
 
   skills:
     path: backend/skills

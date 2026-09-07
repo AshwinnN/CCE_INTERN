@@ -34,6 +34,12 @@ class QueryBody(BaseModel):
     context_enabled: bool = True
 
 
+class RetrieveBody(BaseModel):
+    question: str = Field(min_length=1)
+    limit: int = Field(default=10, ge=1, le=100)
+    graph_depth: int = Field(default=2, ge=1, le=10)
+
+
 class ProposalDecisionBody(BaseModel):
     actor: ActorModel = Field(default_factory=ActorModel)
     comment: str = ""
@@ -120,6 +126,14 @@ def create_app(app_context: Any) -> FastAPI:
             "valid_until": result.valid_until,
             "confidence": result.confidence,
         }
+
+    @http_app.post("/retrieve")
+    def retrieve(body: RetrieveBody):
+        return app_context.retrieval_service.retrieve(
+            body.question,
+            limit=body.limit,
+            graph_depth=body.graph_depth,
+        )
 
     return http_app
 

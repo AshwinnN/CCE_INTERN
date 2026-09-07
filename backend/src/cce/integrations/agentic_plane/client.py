@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import logging
 from typing import Any
 
 from agenticplane import AgenticPlane
@@ -10,6 +11,10 @@ from agenticplane.types import MemoryType
 
 from cce.integrations.agentic_plane.bridge import AgenticPlaneMemoryBridge
 from cce.integrations.agentic_plane.chunking import payload_chunks
+from cce.integrations.agentic_plane.errors import GraphExtractionError
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgenticPlaneClient:
@@ -47,6 +52,10 @@ class AgenticPlaneClient:
         )
         self._closed = False
 
+    @property
+    def agent_id(self) -> str:
+        return self._agent_id
+
     def index(self, payload: dict) -> dict:
         document_id = payload["document_id"]
         if payload.get("change_type") == "deleted":
@@ -59,7 +68,12 @@ class AgenticPlaneClient:
         # previous memory IDs recorded by CCE before storing the new revision.
         self.delete(document_id)
         if not chunks:
-            return {"status": "indexed", "indexed": 0}
+            return {
+                "status": "indexed",
+                "indexed": 0,
+                "entities_extracted": 0,
+                "relationships_extracted": 0,
+            }
 
         provenance = {
             "document_id": document_id,
@@ -99,7 +113,35 @@ class AgenticPlaneClient:
         except Exception:
             self._delete_new_memories(memory_ids)
             raise
-        return {"status": "indexed", "indexed": len(memory_ids)}
+
+        entity_count = 0
+        relationship_count = 0
+        for item, memory_id in zip(items, memory_ids):
+            try:
+                extraction = self._plane.graph.extract_and_store(
+                    content=item["content"],
+                    agent_id=self._agent_id,
+                    memory_id=memory_id,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "AgenticPlane graph extraction failed for memory_id=%s; "
+                    "verify GRAPH_ENABLED=true and that ArcadeDB is running",
+                    memory_id,
+                )
+                raise GraphExtractionError(
+                    "AgenticPlane graph extraction failed for memory %s; verify "
+                    "GRAPH_ENABLED=true and that ArcadeDB is running" % memory_id
+                ) from exc
+            entity_count += len(extraction.entities)
+            relationship_count += len(extraction.relationships)
+
+        return {
+            "status": "indexed",
+            "indexed": len(memory_ids),
+            "entities_extracted": entity_count,
+            "relationships_extracted": relationship_count,
+        }
 
     def search(self, query: str, *, limit: int = 5) -> list[dict]:
         result = self._plane.memory.search(self._agent_id, query, limit=limit)
@@ -117,8 +159,27 @@ class AgenticPlaneClient:
             self._bridge.delete_document(document_id)
         return {"status": "deleted", "deleted": len(references)}
 
-    def graph(self, *args, **kwargs):
-        raise NotImplementedError("AgenticPlane graph operations are not implemented")
+    def graph(
+        self,
+        query: str,
+        *,
+        agent_id: str | None = None,
+        depth: int = 2,
+        limit: int = 10,
+    ) -> dict:
+        result = self._plane.graph.graphrag_search(
+            query,
+            agent_id=agent_id or self._agent_id,
+            depth=depth,
+            limit=limit,
+        )
+        return {
+            "entities": [_plain_sdk_model(item) for item in result.entities],
+            "relationships": [
+                _plain_sdk_model(item) for item in result.relationships
+            ],
+            "memories": [_plain_sdk_model(item) for item in result.memories],
+        }
 
     def retrieve(self, question: str):
         """Compatibility alias for the currently stubbed runtime read seam."""
@@ -148,6 +209,7 @@ class AgenticPlaneClient:
         metadata = dict(record.metadata or {})
         source_id = metadata.get("source_id")
         return {
+            "memory_id": str(record.memory_id),
             "document_id": metadata.get("document_id"),
             "chunk_text": record.content,
             "source_id": source_id,
@@ -161,3 +223,17 @@ class AgenticPlaneClient:
             },
             "metadata": metadata,
         }
+
+
+def _plain_sdk_model(value: Any) -> dict:
+    """Convert an SDK model to a plain mapping without inventing fields."""
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if model_dump is not None:
+        return dict(model_dump(mode="json"))
+    return {
+        key: item
+        for key, item in vars(value).items()
+        if not key.startswith("_")
+    }

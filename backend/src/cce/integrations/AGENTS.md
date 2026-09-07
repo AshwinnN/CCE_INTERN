@@ -7,13 +7,13 @@
 Implemented:
 - Gemini wrapper using `ChatGoogleGenerativeAI`, deterministic temperature 0.
 - explicit AgenticPlane package boundary.
-- SDK-backed AgenticPlane index/search/delete with CCE-owned memory references.
+- SDK-backed AgenticPlane index/search/delete, synchronous graph extraction and GraphRAG search.
 - pgvector local fallback using the same payload chunking and search shape.
 
 Missing / incomplete:
 - no production caller uses the Gemini wrapper;
 - the governed runtime read/context-assembly path is not wired;
-- AgenticPlane graph/entity extraction is not implemented.
+- hosted graph calls require AgenticPlane GRAPH_ENABLED and ArcadeDB.
 
 ## Purpose
 
@@ -51,6 +51,7 @@ normalized payload
   -> shared block/cell chunking
   -> SDK memory.store_batch(raw text)
   -> cce_agentic_plane_memory references
+  -> synchronous graph.extract_and_store per returned memory ID
 ```
 
 ## Important Components
@@ -60,8 +61,8 @@ normalized payload
 - `complete()` creates the model client per call and returns message content.
 
 `integrations/agentic_plane/client.py`
-- `AgenticPlaneClient` wraps SDK memory index/search/per-memory delete.
-- graph operations remain intentionally unimplemented.
+- `AgenticPlaneClient` wraps SDK memory index/search/per-memory delete and graph operations.
+- `LocalIndexClient.graph()` raises an explicit `GraphNotSupportedError`.
 
 ## Inputs / Outputs
 

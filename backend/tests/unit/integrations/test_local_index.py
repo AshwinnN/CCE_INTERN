@@ -1,5 +1,8 @@
 import uuid
 
+import pytest
+
+from cce.integrations.agentic_plane.errors import GraphNotSupportedError
 from cce.integrations.agentic_plane.local_index import LocalIndexClient
 
 
@@ -7,6 +10,7 @@ class FakeCursor:
     def __init__(self):
         self.rows = [
             {
+                "memory_id": "local-memory-1",
                 "document_id": "doc-1",
                 "chunk_text": "alpha searchable text",
                 "source_id": str(uuid.uuid4()),
@@ -77,9 +81,17 @@ def test_local_index_indexes_blocks_and_searches_with_provenance(monkeypatch):
     assert result == {"status": "indexed", "indexed": 1}
 
     rows = client.search("alpha", limit=1)
+    assert rows[0]["memory_id"] == "local-memory-1"
     assert rows[0]["chunk_text"] == "alpha searchable text"
     assert rows[0]["source_id"] == rows[0]["provenance"]["source_id"]
     assert rows[0]["score"] == 0.9
     assert rows[0]["provenance"]["source_ref"] == "file:///doc-1.txt"
     assert rows[0]["provenance"]["version"] == "v1"
     assert rows[0]["provenance"]["object_id"] == "doc-1.txt"
+
+
+def test_graph_explicitly_reports_local_backend_is_unsupported():
+    client = LocalIndexClient("postgresql://unused", embed_texts=lambda texts: [])
+
+    with pytest.raises(GraphNotSupportedError, match="unsupported"):
+        client.graph("Who is related?")

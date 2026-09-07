@@ -38,6 +38,15 @@ def test_http_adapter_health_sources_and_query():
                 context_used=True,
             )
         ),
+        retrieval_service=SimpleNamespace(
+            retrieve=lambda question, limit, graph_depth: {
+                "trace_id": "retrieve-trace-1",
+                "question": question,
+                "backend": "agentic_plane",
+                "memories": [],
+                "graph": {"entities": [], "relationships": [], "memories": []},
+            }
+        ),
         governance_service=SimpleNamespace(),
         package_service=SimpleNamespace(),
     )
@@ -82,4 +91,14 @@ def test_http_adapter_health_sources_and_query():
         "approver": "",
         "valid_until": "",
         "confidence": 0.0,
+    }
+    assert client.post(
+        "/retrieve",
+        json={"question": "Who worked on CCE?", "limit": 7, "graph_depth": 3},
+    ).json() == {
+        "trace_id": "retrieve-trace-1",
+        "question": "Who worked on CCE?",
+        "backend": "agentic_plane",
+        "memories": [],
+        "graph": {"entities": [], "relationships": [], "memories": []},
     }
