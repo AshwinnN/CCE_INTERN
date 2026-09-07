@@ -25,6 +25,10 @@ class InMemoryRepo:
     def get_source(self, source_id):
         return self.sources.get(source_id)
 
+    def list_sources(self):
+        unique_sources = {source["source_id"]: source for source in self.sources.values()}
+        return list(unique_sources.values())
+
     def create_ingestion_run(self, source_id, trace_id=None):
         self.runs["run-1"] = {
             "run_id": "run-1",
@@ -84,8 +88,22 @@ def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
         source_id="docs",
         credential_ref="",
         kind="unstructured",
-        config={"root_path": str(root)},
+        config={"root_path": str(root), "password": "must-not-leak"},
     )
+
+    assert service.list_sources() == [
+        {
+            "source_id": registered.source_id,
+            "adapter": "local-fs",
+            "account_id": "docs",
+            "kind": "unstructured",
+            "credential_ref": None,
+            "config": {"root_path": str(root), "password": "[REDACTED]"},
+            "enabled": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
 
     assert service.test_connection(registered.source_id).status == "CONNECTED"
     result = service.trigger_ingestion(registered.source_id)

@@ -64,6 +64,10 @@ def create_app(app_context: Any) -> FastAPI:
         )
         return _source_result(result)
 
+    @http_app.get("/sources")
+    def list_sources():
+        return app_context.source_service.list_sources()
+
     @http_app.post("/sources/{source_id}/test")
     def test_connection(source_id: str, body: ActorBody | None = None):
         return _source_result(app_context.source_service.test_connection(source_id))

@@ -25,6 +25,8 @@ class FakeCursor:
                 "enabled": params[6],
             }
             self.result = (params[0],)
+        elif "FROM cce_source" in sql and "ORDER BY created_at" in sql:
+            self.result = [self.db["source"]] if "source" in self.db else []
         elif "SELECT source_id, adapter" in sql:
             self.result = self.db.get("source")
         elif "INSERT INTO cce_ingestion_run" in sql:
@@ -50,6 +52,9 @@ class FakeCursor:
             self.result = self.db.get("run")
 
     def fetchone(self):
+        return self.result
+
+    def fetchall(self):
         return self.result
 
 
@@ -88,6 +93,7 @@ def test_source_config_and_run_state_round_trip(monkeypatch):
     source = repo.get_source(saved_id)
     assert source["credential_ref"] == "env://LOCAL"
     assert source["config"] == {"root_path": "/tmp/docs"}
+    assert repo.list_sources() == [source]
 
     run_id = repo.create_ingestion_run(saved_id, trace_id="trace-1")
     repo.update_ingestion_run(run_id, "SUCCESS", objects_processed=2, objects_failed=0)

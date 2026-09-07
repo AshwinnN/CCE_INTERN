@@ -64,6 +64,9 @@ class SourceService:
         )
         return SourceOperationResult(source_id=saved_id, status="REGISTERED")
 
+    def list_sources(self) -> list[dict]:
+        return [_public_source(source) for source in self.source_repository.list_sources()]
+
     def test_connection(self, source_id: str) -> SourceOperationResult:
         try:
             source = self._require_source(source_id)
@@ -275,6 +278,40 @@ class SourceService:
 
 def _kind_for_adapter(adapter: str) -> str:
     return "structured" if adapter == "snowflake" else "unstructured"
+
+
+def _public_source(source: dict) -> dict:
+    return {
+        "source_id": str(source["source_id"]),
+        "adapter": source["adapter"],
+        "account_id": source["account_id"],
+        "kind": source.get("kind"),
+        "credential_ref": source.get("credential_ref"),
+        "config": _redact_secrets(source.get("config") or {}),
+        "enabled": source.get("enabled", True),
+        "created_at": source.get("created_at"),
+        "updated_at": source.get("updated_at"),
+    }
+
+
+def _redact_secrets(value):
+    sensitive_keys = {
+        "api_key",
+        "connection_string",
+        "credential",
+        "password",
+        "private_key",
+        "secret",
+        "token",
+    }
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if key.lower() in sensitive_keys else _redact_secrets(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_secrets(item) for item in value]
+    return value
 
 
 def _event_for_object(source: dict, obj: dict, trace_id: str) -> dict:

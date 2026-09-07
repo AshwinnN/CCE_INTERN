@@ -168,6 +168,7 @@ Status: **PARTIAL**
 Implemented:
 - gRPC and HTTP source endpoints delegate to `cce.sources.service.SourceService`;
 - `RegisterSource` persists source kind, credential reference and non-secret config;
+- `GET /sources` lists registered sources through the source service/repository path without resolving credentials;
 - `GetIngestionStatus` reads durable run state from PostgreSQL.
 
 Missing:

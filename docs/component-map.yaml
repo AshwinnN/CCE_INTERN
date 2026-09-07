@@ -173,6 +173,7 @@ modules:
         - backend/src/cce/sources/service.py:SourceService
       important_components:
         - backend/src/cce/sources/service.py:SourceService.register_source
+        - backend/src/cce/sources/service.py:SourceService.list_sources
         - backend/src/cce/sources/service.py:SourceService.test_connection
         - backend/src/cce/sources/service.py:SourceService.trigger_ingestion
         - backend/src/cce/sources/service.py:SourceService.get_ingestion_status

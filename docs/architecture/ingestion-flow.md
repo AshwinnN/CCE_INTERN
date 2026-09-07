@@ -6,9 +6,10 @@ integration boundaries.
 
 ## Server-triggered path
 
-`SourceService.RegisterSource`, `TestConnection`, `TriggerIngestion` and
-`GetIngestionStatus` are implemented in `cce.sources.service` and reached by
-both gRPC and the thin HTTP adapter. Source configuration is persisted by
+`SourceService.RegisterSource`, `ListSources`, `TestConnection`,
+`TriggerIngestion` and `GetIngestionStatus` are implemented in
+`cce.sources.service`. The thin HTTP adapter exposes source listing as
+`GET /sources`; source configuration is persisted by
 `PostgresSourceRepository`; `TriggerIngestion` creates a durable ingestion run,
 connects to the registered source, lists the available objects/schema and calls
 `run_ingestion()`.

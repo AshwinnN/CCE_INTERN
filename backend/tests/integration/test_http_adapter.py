@@ -10,6 +10,19 @@ def test_http_adapter_health_sources_and_query():
     app_context = SimpleNamespace(
         ready=True,
         source_service=SimpleNamespace(
+            list_sources=lambda: [
+                {
+                    "source_id": "source-123",
+                    "adapter": "snowflake",
+                    "account_id": "abc",
+                    "kind": "structured",
+                    "credential_ref": "env://X",
+                    "config": {"schema": "PUBLIC"},
+                    "enabled": True,
+                    "created_at": None,
+                    "updated_at": None,
+                }
+            ],
             register_source=lambda adapter, source_id, credential_ref, kind, config: SimpleNamespace(
                 source_id="source-123", status="REGISTERED", error=None
             ),
@@ -63,6 +76,19 @@ def test_http_adapter_health_sources_and_query():
             "config": {"schema": "PUBLIC"},
         },
     ).json() == {"source_id": "source-123", "status": "REGISTERED"}
+    assert client.get("/sources").json() == [
+        {
+            "source_id": "source-123",
+            "adapter": "snowflake",
+            "account_id": "abc",
+            "kind": "structured",
+            "credential_ref": "env://X",
+            "config": {"schema": "PUBLIC"},
+            "enabled": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
     assert client.post("/sources/source-123/test", json={}).json() == {
         "source_id": "source-123",
         "status": "CONNECTED",
@@ -102,3 +128,8 @@ def test_http_adapter_health_sources_and_query():
         "memories": [],
         "graph": {"entities": [], "relationships": [], "memories": []},
     }
+
+    app_context.source_service.list_sources = lambda: []
+    empty_response = client.get("/sources")
+    assert empty_response.status_code == 200
+    assert empty_response.json() == []

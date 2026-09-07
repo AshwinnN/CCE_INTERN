@@ -72,6 +72,20 @@ class PostgresSourceRepository:
                 row = cur.fetchone()
         return dict(row) if row else None
 
+    def list_sources(self) -> list[dict]:
+        with psycopg2.connect(self._dsn) as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT source_id, adapter, account_id, kind, credential_ref,
+                           config, enabled, created_at, updated_at
+                    FROM cce_source
+                    ORDER BY created_at, source_id
+                    """
+                )
+                rows = cur.fetchall()
+        return [dict(row) for row in rows]
+
     def create_ingestion_run(self, source_id: str, trace_id: str | None = None) -> str:
         run_id = str(uuid.uuid4())
         source = self.get_source(source_id)
