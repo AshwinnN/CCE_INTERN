@@ -26,9 +26,12 @@ def _serve_http(app) -> None:
 def main() -> None:
     settings = load_settings()
     app = build_application(settings)
-    if settings.http_enabled:
-        Thread(target=_serve_http, args=(app,), daemon=True).start()
-    serve(app)
+    try:
+        if settings.http_enabled:
+            Thread(target=_serve_http, args=(app,), daemon=True).start()
+        serve(app)
+    finally:
+        app.close()
 
 
 if __name__ == "__main__":

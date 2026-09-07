@@ -66,3 +66,58 @@ class SettingsDatabaseUrlTests(unittest.TestCase):
                 settings._build_database_url(),
                 "postgresql://cce_user:secret-pw@postgres:5432/cce_control",
             )
+
+
+class AgenticPlaneSettingsTests(unittest.TestCase):
+    def test_agentic_plane_requires_endpoint_and_key(self):
+        with mock.patch.object(settings, "load_dotenv"), mock.patch.dict(
+            os.environ,
+            {"CCE_ENVIRONMENT": "local", "CCE_INDEX_BACKEND": "agentic_plane"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "CCE_AGENTICPLANE_BASE_URL, CCE_AGENTICPLANE_API_KEY",
+            ):
+                settings.load_settings()
+
+    def test_agentic_plane_resolves_key_reference_and_reads_tuning(self):
+        environment = {
+            "CCE_ENVIRONMENT": "local",
+            "CCE_INDEX_BACKEND": "agentic_plane",
+            "CCE_AGENTICPLANE_BASE_URL": "https://plane.example",
+            "CCE_AGENTICPLANE_API_KEY": "env://PLANE_KEY",
+            "CCE_AGENTICPLANE_TIMEOUT": "41",
+            "CCE_AGENTICPLANE_MAX_RETRIES": "6",
+            "CCE_AGENTICPLANE_AGENT_ID": "cce-prod-ingestion",
+        }
+        with mock.patch.object(settings, "load_dotenv"), mock.patch.dict(
+            os.environ, environment, clear=True
+        ), mock.patch.object(settings, "load_credential", return_value="ap_resolved") as load:
+            loaded = settings.load_settings()
+
+        load.assert_called_once_with("env://PLANE_KEY")
+        self.assertEqual(loaded.agenticplane_base_url, "https://plane.example")
+        self.assertEqual(loaded.agenticplane_api_key, "ap_resolved")
+        self.assertEqual(loaded.agenticplane_timeout, 41)
+        self.assertEqual(loaded.agenticplane_max_retries, 6)
+        self.assertEqual(loaded.agenticplane_agent_id, "cce-prod-ingestion")
+        self.assertNotIn("ap_resolved", repr(loaded))
+
+    def test_agentic_plane_accepts_raw_api_key_and_defaults(self):
+        environment = {
+            "CCE_ENVIRONMENT": "local",
+            "CCE_INDEX_BACKEND": "agentic_plane",
+            "CCE_AGENTICPLANE_BASE_URL": "https://plane.example",
+            "CCE_AGENTICPLANE_API_KEY": "ap_raw",
+        }
+        with mock.patch.object(settings, "load_dotenv"), mock.patch.dict(
+            os.environ, environment, clear=True
+        ), mock.patch.object(settings, "load_credential") as load:
+            loaded = settings.load_settings()
+
+        load.assert_not_called()
+        self.assertEqual(loaded.agenticplane_api_key, "ap_raw")
+        self.assertEqual(loaded.agenticplane_timeout, 30)
+        self.assertEqual(loaded.agenticplane_max_retries, 3)
+        self.assertEqual(loaded.agenticplane_agent_id, "cce-ingestion")

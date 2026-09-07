@@ -218,6 +218,7 @@ modules:
         - backend/migrations/cce_control/002_metadata.sql
         - backend/migrations/cce_control/007_source_config.sql
         - backend/migrations/cce_control/008_local_index.sql
+        - backend/migrations/cce_control/011_agentic_plane_refs.sql
       owns:
         - cce_control persistence contracts and implementations
     inputs:
@@ -225,6 +226,7 @@ modules:
       - schema snapshots/tables/columns/constraints/relationships
       - ingestion run state
       - local index chunks
+      - AgenticPlane document-to-memory references
     outputs:
       - durable PostgreSQL state
     depends_on:
@@ -459,9 +461,13 @@ modules:
       entrypoints:
         - backend/src/cce/integrations/llm/client.py:complete
         - backend/src/cce/integrations/agentic_plane/local_index.py:LocalIndexClient
-        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.retrieve
+        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.index
+        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.search
+        - backend/src/cce/integrations/agentic_plane/client.py:AgenticPlaneClient.delete
       important_components:
         - backend/src/cce/integrations/agentic_plane/base.py:AgenticPlaneBoundary
+        - backend/src/cce/integrations/agentic_plane/bridge.py:AgenticPlaneMemoryBridge
+        - backend/src/cce/integrations/agentic_plane/chunking.py:payload_chunks
       owns:
         - external SDK/model adapter boundary
     inputs:
@@ -474,18 +480,24 @@ modules:
     depends_on:
       - Google Gemini LangChain package
       - pgvector when local indexing is enabled
+      - AgenticPlane Python SDK when hosted indexing is enabled
+      - cce_agentic_plane_memory bridge table
     used_by:
-      - runtime.retrieval uses AgenticPlane placeholder
-      - source service uses the configured index boundary
+      - source service uses the configured index boundary for ingestion writes
+      - runtime.retrieval has a legacy adapter-specific seam but no active governed read path
     invariants:
       enforced:
         - Gemini temperature is set to zero
         - local indexing/search stays behind the AgenticPlane boundary
+        - hosted writes send raw text for server-side embedding
+        - hosted memory IDs are retained in the CCE-owned bridge table
+        - search scores use cosine similarity, with higher values ranked better
       required_but_not_fully_enforced:
         - AgenticPlane accessed only through adapter
         - runtime uses the configured LLM where agentic reasoning is required
     known_gaps:
-      - AgenticPlaneClient external-SDK implementation is still a placeholder.
+      - AgenticPlane graph/entity extraction is not implemented.
+      - The governed runtime read/context-assembly path is not wired to boundary search.
       - LocalIndexClient implements exact vector search only, not ANN indexing or graph operations; MVP data volumes favor deterministic exact nearest-neighbor behavior over ivfflat tuning.
       - Gemini client has no production call site.
     related_docs:

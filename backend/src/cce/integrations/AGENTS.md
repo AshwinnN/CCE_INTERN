@@ -7,11 +7,13 @@
 Implemented:
 - Gemini wrapper using `ChatGoogleGenerativeAI`, deterministic temperature 0.
 - explicit AgenticPlane package boundary.
+- SDK-backed AgenticPlane index/search/delete with CCE-owned memory references.
+- pgvector local fallback using the same payload chunking and search shape.
 
 Missing / incomplete:
 - no production caller uses the Gemini wrapper;
-- AgenticPlane retrieval always returns an empty list;
-- no index/search/graph/delete implementation exists in this adapter.
+- the governed runtime read/context-assembly path is not wired;
+- AgenticPlane graph/entity extraction is not implemented.
 
 ## Purpose
 
@@ -27,7 +29,9 @@ Isolate third-party model/platform SDKs so core CCE modules do not depend on the
 ## Entry Points
 
 - `backend/src/cce/integrations/llm/client.py::complete()`
-- `backend/src/cce/integrations/agentic_plane/client.py::AgenticPlaneClient.retrieve()`
+- `backend/src/cce/integrations/agentic_plane/client.py::AgenticPlaneClient.index()`
+- `backend/src/cce/integrations/agentic_plane/client.py::AgenticPlaneClient.search()`
+- `backend/src/cce/integrations/agentic_plane/client.py::AgenticPlaneClient.delete()`
 
 ## Main Flow
 
@@ -40,10 +44,13 @@ complete(prompt)
   -> message content
 ```
 
-Current AgenticPlane:
+Current AgenticPlane write path:
 
 ```text
-retrieve(question) -> []
+normalized payload
+  -> shared block/cell chunking
+  -> SDK memory.store_batch(raw text)
+  -> cce_agentic_plane_memory references
 ```
 
 ## Important Components
@@ -53,7 +60,8 @@ retrieve(question) -> []
 - `complete()` creates the model client per call and returns message content.
 
 `integrations/agentic_plane/client.py`
-- `AgenticPlaneClient` boundary; current `retrieve()` is a stub.
+- `AgenticPlaneClient` wraps SDK memory index/search/per-memory delete.
+- graph operations remain intentionally unimplemented.
 
 ## Inputs / Outputs
 
@@ -63,16 +71,20 @@ Inputs:
 
 Outputs:
 - LLM text response.
-- currently empty AgenticPlane retrieval list.
+- backend-neutral retrieval/search results with provenance.
 
 ## Dependencies
 
 - `langchain-google-genai`
-- target external AgenticPlane SDK (not meaningfully used in current client)
+- AgenticPlane Python SDK
+- private package-registry pip configuration for container builds
+- CCE control Postgres for the memory-reference bridge
 
 ## Used By
 
-- `runtime/retrieval.py` instantiates/calls AgenticPlane retrieval boundary.
+- `SourceService` injects the configured boundary into ingestion writes.
+- `runtime/retrieval.py` retains a legacy adapter-specific seam; the governed
+  runtime read path is not active.
 - Gemini wrapper has no production call site found; tests exercise it.
 
 ## Invariants
@@ -109,6 +121,7 @@ Expected:
 - AgenticPlane is the external vector/graph/retrieval boundary.
 
 Current:
-- adapter implements only `retrieve()` and returns `[]`; ingestion instead uses a generic `CCE_SDK_ENDPOINT` HTTP emit helper.
+- source-service ingestion uses the configured SDK-backed or local boundary;
+- runtime retrieval/context assembly and graph operations remain incomplete.
 
 Status: **PARTIAL**

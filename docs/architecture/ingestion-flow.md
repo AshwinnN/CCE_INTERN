@@ -30,9 +30,10 @@ AgenticPlane boundary implementation:
 
 - `CCE_INDEX_BACKEND=local` uses the pgvector-backed
   `LocalIndexClient`.
-- `CCE_INDEX_BACKEND=agentic_plane` uses `AgenticPlaneClient`; the external SDK
-  implementation remains a placeholder.
+- `CCE_INDEX_BACKEND=agentic_plane` uses the real SDK-backed
+  `AgenticPlaneClient`. It sends raw chunks for server-side embedding and keeps
+  returned memory IDs in the CCE-owned `cce_agentic_plane_memory` bridge table.
 
-The local index is for MVP/demo searchability and synthetic end-to-end proof. It
-does not implement graph extraction, governance proposal creation, package
+The local index remains the offline/dev fallback. Neither backend's ingestion
+path implements graph extraction, governance proposal creation, package
 assembly or approved runtime retrieval.

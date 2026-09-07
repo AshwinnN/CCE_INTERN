@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 import uuid
 import hashlib
-from typing import Callable, Iterable
+from typing import Callable
 
 import psycopg2
 import psycopg2.extras
+
+from cce.integrations.agentic_plane.chunking import payload_chunks as _payload_chunks
 
 
 DEFAULT_EMBEDDING_MODEL = "models/text-embedding-004"
@@ -79,11 +81,13 @@ class LocalIndexClient:
                     (_vector_literal(embedding), _vector_literal(embedding), limit),
                 )
                 rows = cur.fetchall()
+        # Boundary convention: score is cosine similarity, so higher is better.
         return [
             {
                 "document_id": row["document_id"],
                 "chunk_text": row["chunk_text"],
-                "score": float(row["distance"]),
+                "source_id": row["source_id"],
+                "score": 1.0 - float(row["distance"]),
                 "provenance": {
                     "source_id": row["source_id"],
                     "source_ref": row["source_ref"],
@@ -125,27 +129,6 @@ class LocalIndexClient:
             google_api_key=api_key,
         )
         return embeddings.embed_documents(texts)
-
-
-def _payload_chunks(payload: dict) -> Iterable[dict]:
-    for block in payload.get("blocks", []):
-        text = block.get("text")
-        if text:
-            yield {
-                "chunk_text": text,
-                "metadata": {"block_id": block.get("id"), "type": block.get("type")},
-            }
-        for cell in block.get("cells") or []:
-            if isinstance(cell, dict) and cell.get("text"):
-                yield {
-                    "chunk_text": cell["text"],
-                    "metadata": {
-                        "block_id": block.get("id"),
-                        "type": block.get("type"),
-                        "row": cell.get("row"),
-                        "col": cell.get("col"),
-                    },
-                }
 
 
 def _source_uuid(source_id: str) -> str:

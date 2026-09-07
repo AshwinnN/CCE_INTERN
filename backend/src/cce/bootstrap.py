@@ -29,6 +29,11 @@ class Application:
     ready: bool = False
     readiness_message: str = "starting"
 
+    def close(self) -> None:
+        close = getattr(self.index_client, "close", None)
+        if close is not None:
+            close()
+
 
 def build_application(settings: Settings) -> Application:
     if settings.migrate_on_startup:
@@ -41,7 +46,14 @@ def build_application(settings: Settings) -> Application:
     metadata_repository = PostgreSQLMetadataRepository(settings.database_url)
     checkpoint_store = IngestionCheckpointStore()
     index_client = (
-        AgenticPlaneClient()
+        AgenticPlaneClient(
+            base_url=settings.agenticplane_base_url,
+            api_key=settings.agenticplane_api_key,
+            timeout=settings.agenticplane_timeout,
+            max_retries=settings.agenticplane_max_retries,
+            agent_id=settings.agenticplane_agent_id,
+            dsn=settings.database_url,
+        )
         if settings.index_backend == "agentic_plane"
         else LocalIndexClient(settings.database_url)
     )

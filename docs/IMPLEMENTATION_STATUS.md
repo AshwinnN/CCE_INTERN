@@ -128,10 +128,15 @@ Implemented:
 - real fetch, parser selection, canonical normalization, SDK-emission hook and file checkpoint in `ingestion/orchestrator.py`;
 - MIME-based parsing uses text/csv/excel parsers, `pypdfium2` for PDFs, `python-docx` for Word files and `python-pptx` for PowerPoint files;
 - server `TriggerIngestion` creates an ingestion run, calls the real workflow and updates durable run state;
-- the configured AgenticPlane boundary can be the pgvector-backed `LocalIndexClient`, making synthetic ingested documents searchable.
+- the configured AgenticPlane boundary can be the SDK-backed `AgenticPlaneClient`
+  for hosted writes or the pgvector-backed `LocalIndexClient` fallback;
+- the hosted path sends raw chunks to `memory.store_batch()`, persists returned
+  IDs in `cce_agentic_plane_memory`, and supports document replacement/deletion.
 
 Missing:
 - no governance proposal output.
+- the governed runtime read/context-assembly path is not wired, and graph/entity
+  extraction remains unimplemented.
 
 ### Server source lifecycle
 
@@ -296,7 +301,7 @@ The following capability IDs have no meaningful active implementation beyond con
 | PKG-08 Version Domain Package | PARTIAL | `next_patch_version()` | no persisted immutable versions |
 | PKG-09 Associate rules with versions | PLANNED | proto assets field only | no storage |
 | RT-01 Parse business question | PLANNED | `determine_intent()` returns `unknown` | — |
-| RT-02 Retrieve graph facts | PLANNED | AgenticPlane retrieval returns `[]` | — |
+| RT-02 Retrieve graph facts | PLANNED | AgenticPlane vector search exists only at the integration boundary | no active governed runtime retrieval or graph-fact path |
 | RT-03 Identify applicable rule | PLANNED | `resolve_rules()` returns `[]` | — |
 | RT-04 Validate applicability | PLANNED | no active implementation | — |
 | RT-05 Resolve Snowflake entity | PLANNED | entity resolver returns `[]` | — |
@@ -351,7 +356,7 @@ No **major capability** is classified `LEGACY / UNUSED`. The repository does con
 
 ## Unknown / Requires Verification
 
-No capability in the supplied mapping required `UNKNOWN / REQUIRES VERIFICATION` after code tracing. External production behavior of third-party systems (for example, what a future AgenticPlane deployment would persist) is intentionally not claimed as repository behavior.
+No capability in the supplied mapping required `UNKNOWN / REQUIRES VERIFICATION` after code tracing. The repository now contains a real AgenticPlane SDK adapter, while live hosted persistence remains an integration-environment behavior verified by the guarded smoke script rather than claimed from source inspection alone.
 
 ## Potential dead / duplicate / disconnected code with concrete evidence
 

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -8,7 +9,11 @@ COPY backend/migrations /app/backend/migrations
 COPY scripts/generate_proto.py /app/scripts/generate_proto.py
 COPY scripts/smoke_server.py /app/scripts/smoke_server.py
 COPY scripts/run_api_ingestion_smoke.py /app/scripts/run_api_ingestion_smoke.py
-RUN pip install --no-cache-dir grpcio grpcio-tools protobuf python-dotenv psycopg2-binary fastapi uvicorn langgraph langchain-google-genai requests azure-storage-blob snowflake-connector-python cryptography pypdfium2 python-docx python-pptx \
+# AgenticPlane is distributed through the private package registry. Supply a
+# pip.conf as BuildKit secret id=pip_config so registry credentials never enter
+# an image layer or build argument.
+RUN --mount=type=secret,id=pip_config,target=/etc/pip.conf,required=true \
+    pip install --no-cache-dir grpcio grpcio-tools protobuf python-dotenv psycopg2-binary fastapi uvicorn langgraph langchain-google-genai requests azure-storage-blob snowflake-connector-python cryptography pypdfium2 python-docx python-pptx 'agenticplane>=1.2.2,<2' \
     && python /app/scripts/generate_proto.py \
     && cd /app/backend \
     && pip install --no-cache-dir --no-build-isolation --no-deps .

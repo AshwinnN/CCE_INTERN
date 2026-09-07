@@ -24,6 +24,7 @@ MIGRATION_FILES = (
     "007_source_config.sql",
     "008_local_index.sql",
     "009_local_index_exact_search.sql",
+    "011_agentic_plane_refs.sql",
 )
 
 

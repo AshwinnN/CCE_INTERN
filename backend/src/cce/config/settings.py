@@ -1,6 +1,6 @@
 """Typed backend settings loaded from environment variables."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from urllib.parse import urlparse
 
@@ -21,6 +21,11 @@ class Settings:
     http_enabled: bool = True
     http_port: int = 8080
     index_backend: str = "local"
+    agenticplane_base_url: str = ""
+    agenticplane_api_key: str = field(default="", repr=False)
+    agenticplane_timeout: int = 30
+    agenticplane_max_retries: int = 3
+    agenticplane_agent_id: str = "cce-ingestion"
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -64,9 +69,30 @@ def _build_database_url() -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{db}"
 
 
+def _resolve_agenticplane_api_key(value: str) -> str:
+    if value.startswith(("env://", "azure-kv://")):
+        return load_credential(value)
+    return value
+
+
 def load_settings() -> Settings:
     load_dotenv(".env", override=False)
     load_dotenv("backend/.env", override=False)
+
+    index_backend = os.environ.get("CCE_INDEX_BACKEND", "local").strip().lower()
+    agenticplane_base_url = os.environ.get("CCE_AGENTICPLANE_BASE_URL", "").strip()
+    api_key_value = os.environ.get("CCE_AGENTICPLANE_API_KEY", "").strip()
+    if index_backend == "agentic_plane":
+        missing = []
+        if not agenticplane_base_url:
+            missing.append("CCE_AGENTICPLANE_BASE_URL")
+        if not api_key_value:
+            missing.append("CCE_AGENTICPLANE_API_KEY")
+        if missing:
+            raise RuntimeError(
+                "CCE_INDEX_BACKEND=agentic_plane requires " + ", ".join(missing)
+            )
+        api_key_value = _resolve_agenticplane_api_key(api_key_value)
 
     return Settings(
         grpc_host=os.environ.get("CCE_GRPC_HOST", "0.0.0.0"),
@@ -79,5 +105,14 @@ def load_settings() -> Settings:
         ),
         http_enabled=_bool_env("CCE_HTTP_ENABLED", True),
         http_port=int(os.environ.get("CCE_HTTP_PORT", "8080")),
-        index_backend=os.environ.get("CCE_INDEX_BACKEND", "local"),
+        index_backend=index_backend,
+        agenticplane_base_url=agenticplane_base_url,
+        agenticplane_api_key=api_key_value,
+        agenticplane_timeout=int(os.environ.get("CCE_AGENTICPLANE_TIMEOUT", "30")),
+        agenticplane_max_retries=int(
+            os.environ.get("CCE_AGENTICPLANE_MAX_RETRIES", "3")
+        ),
+        agenticplane_agent_id=os.environ.get(
+            "CCE_AGENTICPLANE_AGENT_ID", "cce-ingestion"
+        ).strip(),
     )
