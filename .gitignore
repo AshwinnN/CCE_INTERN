@@ -12,11 +12,6 @@ __pycache__/
 **_pytest**
 **__pycache__**
 
-# Generated protobuf Python code.
-backend/src/cce/gen/**/*.py
-!backend/src/cce/gen/**/__init__.py
-!backend/src/cce/gen/cce/v1/retrieval_pb2.py
-!backend/src/cce/gen/cce/v1/retrieval_pb2_grpc.py
 
 # Local ingestion workflow checkpoint state.
 .ingestion_checkpoints/
