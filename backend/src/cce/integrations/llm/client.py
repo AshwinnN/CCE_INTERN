@@ -10,6 +10,7 @@ Supports two providers, selected by CCE_LLM_PROVIDER:
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -42,11 +43,40 @@ _ASSET_TYPE_ALIASES = {
 }
 
 
+def _coerce_payload(payload: Any) -> dict | None:
+    """Some models serialize the nested payload as a JSON string, or as
+    "ASSET_TYPE:{...}", instead of an actual object. Recover a dict from
+    either shape so a formatting quirk doesn't fail the whole extraction."""
+    if isinstance(payload, dict):
+        return payload
+    if not isinstance(payload, str):
+        return None
+    text = payload.strip()
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        pass
+    prefix, sep, rest = text.partition(":")
+    if sep:
+        try:
+            parsed = json.loads(rest.strip())
+        except (json.JSONDecodeError, TypeError):
+            return None
+        if isinstance(parsed, dict):
+            parsed.setdefault("asset_type", prefix.strip())
+            return parsed
+    return None
+
+
 def _normalize_asset_types(args: dict) -> dict:
     for candidate in args.get("candidates") or []:
-        payload = candidate.get("payload") if isinstance(candidate, dict) else None
-        if not isinstance(payload, dict):
+        if not isinstance(candidate, dict):
             continue
+        payload = _coerce_payload(candidate.get("payload"))
+        if payload is None:
+            continue
+        candidate["payload"] = payload
         tag = payload.get("asset_type")
         if isinstance(tag, str) and tag.upper() not in _VALID_ASSET_TYPES:
             mapped = _ASSET_TYPE_ALIASES.get(tag.strip().lower().replace(" ", "_"))
