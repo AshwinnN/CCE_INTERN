@@ -69,7 +69,37 @@ def _coerce_payload(payload: Any) -> dict | None:
     return None
 
 
-def _normalize_asset_types(args: dict) -> dict:
+def _repair_semantic_mapping(payload: dict, request: Any) -> None:
+    """The extraction model consistently gets this shape wrong: it omits
+    canonical_key/concept/source_id and describes columns as {name, type}
+    objects instead of plain names. source_id is already known ground
+    truth (the item being processed), so backfilling it corrects a client
+    bug rather than guessing. columns is purely mechanical to flatten.
+    canonical_key/concept are synthesized deterministically from
+    database.schema_name.table so the same table always maps to the same
+    key across runs -- unblocks ingestion without the model's cooperation."""
+    columns = payload.get("columns")
+    if isinstance(columns, list):
+        payload["columns"] = [
+            c.get("name") if isinstance(c, dict) else c for c in columns
+        ]
+        payload["columns"] = [c for c in payload["columns"] if isinstance(c, str)]
+
+    if not payload.get("source_id"):
+        source_id = getattr(getattr(request, "source_item", None), "source_id", None)
+        if source_id is not None:
+            payload["source_id"] = str(source_id)
+
+    database = payload.get("database")
+    schema_name = payload.get("schema_name")
+    table = payload.get("table")
+    if not payload.get("canonical_key") and database and schema_name and table:
+        payload["canonical_key"] = f"{database}.{schema_name}.{table}".lower()
+    if not payload.get("concept") and table:
+        payload["concept"] = table
+
+
+def _normalize_asset_types(args: dict, request: Any = None) -> dict:
     for candidate in args.get("candidates") or []:
         if not isinstance(candidate, dict):
             continue
@@ -82,6 +112,8 @@ def _normalize_asset_types(args: dict) -> dict:
             mapped = _ASSET_TYPE_ALIASES.get(tag.strip().lower().replace(" ", "_"))
             if mapped:
                 payload["asset_type"] = mapped
+        if payload.get("asset_type") == "SEMANTIC_MAPPING":
+            _repair_semantic_mapping(payload, request)
     return args
 
 
@@ -200,4 +232,6 @@ class StructuredLLM:
             raise result["parsing_error"] or RuntimeError(
                 "LLM returned no structured result"
             )
-        return output_type.model_validate(_normalize_asset_types(tool_calls[0]["args"]))
+        return output_type.model_validate(
+            _normalize_asset_types(tool_calls[0]["args"], request)
+        )
