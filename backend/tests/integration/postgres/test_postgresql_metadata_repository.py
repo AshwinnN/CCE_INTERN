@@ -60,6 +60,21 @@ class StableUuidTests(unittest.TestCase):
 
 
 class EnsureHierarchyTests(unittest.TestCase):
+    def test_ensure_source_reuses_registered_uuid(self):
+        registered = 'c8d602fb-b8c9-55f8-af0c-a9aeafdbb27d'
+        repo, cur = make_repo([{'source_id': registered}])
+        self.assertEqual(repo.ensure_source('snowflake', registered), registered)
+        self.assertEqual(len(cur.queries), 1)
+        self.assertIn('SELECT source_id', cur.queries[0][0])
+        self.assertEqual(cur.queries[0][1], (registered, 'snowflake'))
+
+    def test_unknown_uuid_account_keeps_legacy_registration(self):
+        account = 'c8d602fb-b8c9-55f8-af0c-a9aeafdbb27d'
+        expected = _stable_uuid('source', 'snowflake', account)
+        repo, cur = make_repo([None, {'source_id': expected}])
+        self.assertEqual(repo.ensure_source('snowflake', account), expected)
+        self.assertIn('INSERT INTO cce_source', cur.queries[1][0])
+
     def test_ensure_source_returns_deterministic_id_and_upserts(self):
         expected_id = _stable_uuid("source", "snowflake", "acct1")
         repo, cur = make_repo([{"source_id": expected_id}])

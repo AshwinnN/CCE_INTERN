@@ -6,7 +6,7 @@ agentic_plane/client.py, agentic_plane/local_index.py, llm/client.py
 
 ## Responsibilities and invariants
 
-AgenticPlane >=1.3 metadata_filter is verified. Preserve domain/source/run provenance. Raw graph is not authoritative runtime context. Structured LLM requests and results use Pydantic; task models fall back to the shared model.
+AgenticPlane >=1.3 metadata_filter is verified. Preserve domain/source/run provenance. Graph results supplement runtime evidence only when their source memories are domain-scoped; original passages establish precise policy facts. Structured LLM requests and results use Pydantic; task models fall back to the shared model.
 
 ## Validation
 

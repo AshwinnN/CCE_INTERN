@@ -44,6 +44,15 @@ class RuntimeRepository:
             ids = [r["source_id"] for r in cur.fetchall()]
         return [self.schema(i) for i in ids]
 
+    def domain_source_ids(self, domain_id) -> list[str]:
+        """Registered, enabled sources detected for the selected domain."""
+        with self.db.transaction() as cur:
+            cur.execute(
+                "SELECT s.source_id::text FROM cce_source s JOIN source_domain d USING(source_id) WHERE d.domain_id=%s AND s.enabled",
+                (str(domain_id),),
+            )
+            return [r['source_id'] for r in cur.fetchall()]
+
     def create_trace(self, trace_id, request):
         with self.db.transaction() as cur:
             cur.execute(

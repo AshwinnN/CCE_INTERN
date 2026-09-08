@@ -6,7 +6,7 @@ orchestrator.py, models.py, sql_pipeline.py, sql_guard.py, sql_executor.py
 
 ## Responsibilities and invariants
 
-Only ACTIVE manifest evidence governs ON. OFF never receives package context. Preserve thresholds. Use the shared SQL guard/retry graph. Persist every attempt and final traces. Never claim measured accuracy from proof preference.
+ON uses domain/source-scoped AgenticPlane vector passages and source-linked GraphRAG results, with ACTIVE package assets as supplemental context. Package approval is not a gate on source passages. OFF never receives package context. Preserve thresholds. Use the shared SQL guard/retry graph. Persist every attempt and final traces. Never claim measured accuracy from proof preference.
 
 ## Validation
 

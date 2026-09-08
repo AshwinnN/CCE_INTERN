@@ -12,7 +12,7 @@ This document describes the actual backend implementation, not a hosted producti
 - Typed seven-kind asset payloads, steward edits, immutable machine proposals, append-only review decisions and automatic terminal-batch package construction.
 - Atomic full-snapshot package activation, immutable revisions/history, monotonically increasing versions, BUILD_BLOCKED and soft retirement.
 - Relational approved graph projection and manifest-restricted bounded traversal.
-- AgenticPlane 1.3 server-side metadata-filtered vector search, package/evidence filtering and explicit insufficient-context behavior.
+- AgenticPlane 1.3 domain/source-filtered vector search and source-linked GraphRAG retrieval, supplemented by active domain-package context, with explicit insufficient-context behavior.
 - Parallel ON/OFF LangGraph branches, structured intent/domain/source selection and shared answer model.
 - Shared SQL generation/parse/validation/guard/execution/error-description/retry graph; sqlglot guards, Snowflake timeout and row cap; durable attempts and structured query node/final traces.
 - Production HTTP and gRPC domain, proposal-edit, package and dual-branch query contracts; regenerated protobuf code. The MCP helper delegates to the same runtime.

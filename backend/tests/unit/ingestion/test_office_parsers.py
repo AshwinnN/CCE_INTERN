@@ -159,6 +159,25 @@ def test_pdf_parser_extracts_text(tmp_path):
     assert result.document.elements[0].text == "Synthetic PDF parser fixture"
 
 
+def test_mime_detection_recognizes_docx_reported_as_zip(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, 'magic', SimpleNamespace(from_file=lambda *a, **k: 'application/zip'))
+    path = tmp_path / 'document.docx'
+    _write_docx_fixture(path)
+    assert detect_mime_type(str(path)) == DOCX_MIME
+    assert isinstance(ParserFactory.get_parser(detect_mime_type(str(path))), DocxParser)
+
+
+def test_mime_detection_does_not_treat_arbitrary_zip_as_docx(monkeypatch, tmp_path):
+    import zipfile
+    from types import SimpleNamespace
+    monkeypatch.setitem(sys.modules, 'magic', SimpleNamespace(from_file=lambda *a, **k: 'application/zip'))
+    path = tmp_path / 'archive.docx'
+    with zipfile.ZipFile(path, 'w') as archive:
+        archive.writestr('readme.txt', 'ordinary archive')
+    assert detect_mime_type(str(path)) == 'application/zip'
+
+
 def test_pdf_parser_empty_is_unsupported(tmp_path):
     pdf_path = tmp_path / "empty.pdf"
     _write_empty_pdf(pdf_path)

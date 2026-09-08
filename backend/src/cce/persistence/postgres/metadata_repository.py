@@ -69,6 +69,21 @@ class PostgreSQLMetadataRepository(MetadataRepository):
                        display_name: Optional[str] = None) -> str:
         source_id = _stable_uuid("source", adapter, account_id)
         with self._cursor() as cur:
+            # Governed ingestion supplies the registered CCE source UUID here;
+            # legacy callers supply a native account name. Reuse that UUID
+            # instead of registering a second source named after it.
+            try:
+                registered_id = str(uuid.UUID(str(account_id)))
+            except ValueError:
+                registered_id = None
+            if registered_id:
+                cur.execute(
+                    "SELECT source_id FROM cce_source WHERE source_id=%s AND adapter=%s",
+                    (registered_id, adapter),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    return str(existing["source_id"])
             cur.execute(
                 """
                 INSERT INTO cce_source (source_id, adapter, account_id, display_name)

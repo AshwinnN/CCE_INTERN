@@ -50,7 +50,7 @@ class QueryIntent(Model):
     intent: str
     concepts: list[str] = Field(default_factory=list)
     entities: list[EntityMention] = Field(default_factory=list)
-    needs_live_data: bool
+    needs_live_data: bool = Field(description="True only when answering requires querying current transactional rows, counts, balances or record status. False for document facts, policies, procedures and reporting deadlines.")
     time_context: str | None = None
     source_hints: list[str] = Field(default_factory=list)
 
@@ -114,12 +114,34 @@ class VectorHit(Model):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class GraphEntity(Model):
+    entity_id: str
+    name: str
+    entity_type: str = ""
+    description: str = ""
+    source_memories: list[str] = Field(default_factory=list)
+
+
+class GraphRelationship(Model):
+    source_entity_id: str
+    target_entity_id: str
+    relation_type: str
+    description: str = ""
+
+
+class GraphContext(Model):
+    status: Literal["SUCCESS", "UNAVAILABLE"] = "SUCCESS"
+    entities: list[GraphEntity] = Field(default_factory=list)
+    relationships: list[GraphRelationship] = Field(default_factory=list)
+
+
 class ResolvedContextBundle(Model):
-    package_id: UUID
-    package_version_id: UUID
-    version: int
+    package_id: UUID | None = None
+    package_version_id: UUID | None = None
+    version: int | None = None
     assets: list[GovernedAsset]
     vector_hits: list[VectorHit] = Field(default_factory=list)
+    graph: GraphContext = Field(default_factory=GraphContext)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -186,6 +208,9 @@ class Citation(Model):
     tables: list[str] = Field(default_factory=list)
     sql: str | None = None
     sql_attempt_id: UUID | None = None
+    memory_id: str | None = None
+    source_uri: str | None = None
+    retrieval_type: Literal["VECTOR", "GRAPH"] | None = None
 
 
 class ContextReference(Model):

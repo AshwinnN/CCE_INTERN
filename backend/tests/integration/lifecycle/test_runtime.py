@@ -70,9 +70,16 @@ class LLM:
 class Index:
     def __init__(self, hits):
         self.hits = hits
+        self.graph_calls = 0
 
     def search(self, *args, **kwargs):
         return self.hits
+
+    def graph(self, *args, **kwargs):
+        self.graph_calls += 1
+        return {'entities': [
+            {'entity_id': 'scoped', 'name': 'Scoped concept', 'source_memories': [self.hits[0]['memory_id']]}
+        ] if self.hits else [], 'relationships': [], 'memories': []}
 
 
 class SQLLLM:
@@ -116,7 +123,7 @@ def test_parallel_runtime_governance_filter_domain_failures_and_traces(system):
     hit = {
         "memory_id": c.evidence[0].agentic_memory_id,
         "score": 0.95,
-        "chunk_text": "RAW CONTENT MUST NOT GOVERN",
+        "chunk_text": "Source passage supporting a policy answer",
         "metadata": {"source_id": str(source), "domain_id": str(domain.domain_id)},
     }
     index = Index([hit])
@@ -136,8 +143,10 @@ def test_parallel_runtime_governance_filter_domain_failures_and_traces(system):
     answers = [r for r in llm.requests if isinstance(r, AnswerRequest)]
     assert len(answers) == 2 and sum(r.context is None for r in answers) == 1
     assert all(
-        h.content == "" for r in answers if r.context for h in r.context.vector_hits
+        h.content == hit['chunk_text'] for r in answers if r.context for h in r.context.vector_hits
     )
+    assert index.graph_calls == 1
+    assert next(r for r in answers if r.context).context.graph.entities[0].entity_id == 'scoped'
     assert response.context_on.citations and response.context_on.context_used
     with s.db.transaction() as cur:
         cur.execute(
@@ -145,9 +154,11 @@ def test_parallel_runtime_governance_filter_domain_failures_and_traces(system):
             (str(response.trace_id),),
         )
         assert cur.fetchone()["status"] == "SUCCESS"
-    # Unlinked or low-score memory must not reach the answer model; OFF remains available.
+    # Source passages need not have an approved asset. Domain and score gates remain.
     llm.barrier = None
-    for bad in ({**hit, "memory_id": "unapproved-memory"}, {**hit, "score": 0.1}):
+    index.hits = [{**hit, 'memory_id': 'unapproved-memory'}]
+    assert runtime.run(QueryRequest(question='Define term')).context_on.status == 'SUCCESS'
+    for bad in ({**hit, 'metadata': {**hit['metadata'], 'domain_id': str(uuid4())}}, {**hit, "score": 0.1}):
         index.hits = [bad]
         response = runtime.run(QueryRequest(question="Define term"))
         assert (
@@ -160,7 +171,7 @@ def test_parallel_runtime_governance_filter_domain_failures_and_traces(system):
         QueryRequest(question="Define term", domain_id=other.domain_id)
     )
     assert (
-        response.context_on.status == "NO_ACTIVE_PACKAGE"
+        response.context_on.status == "INSUFFICIENT_CONTEXT"
         and response.context_off.status == "SUCCESS"
     )
     response = runtime.run(QueryRequest(question="Define term", domain_id=uuid4()))

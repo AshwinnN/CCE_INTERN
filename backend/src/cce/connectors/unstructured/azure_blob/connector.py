@@ -3,6 +3,7 @@ import os
 import tempfile
 from typing import Iterator, Tuple
 from azure.storage.blob import BlobServiceClient
+from azure.core.exceptions import HttpResponseError
 from cce.connectors.base.source import SourceConnection, SourceConnector
 from cce.connectors.base.exceptions import ConnectionFailedError
 from cce.ingestion.models import DocumentMetadata
@@ -37,7 +38,15 @@ class AzureBlobSource(SourceConnector):
     def connect(self) -> SourceConnection:
         logger.info("Connecting to Azure Blob container=%s", self.container_name)
         try:
-            self.container_client.get_container_properties()
+            try:
+                self.container_client.get_container_properties()
+            except HttpResponseError as exc:
+                if exc.status_code != 403:
+                    raise
+                # A container SAS may allow blob read/list without permission
+                # to inspect container properties. Probe the operation ingestion
+                # actually needs, consuming at most one listing page.
+                next(iter(self.container_client.list_blobs(results_per_page=1)), None)
         except Exception as exc:
             logger.error("Azure Blob connection failed for container=%s: %s", self.container_name, exc)
             raise ConnectionFailedError(
