@@ -5,14 +5,33 @@
 **PARTIAL**
 
 Implemented:
-- environment-driven log-level constant.
-- `configure_logging()` wrapper around `logging.basicConfig()`.
+- environment-driven log-level constant (`CCE_LOG_LEVEL`).
+- `configure_logging()`: root logger with a console handler and a rotating
+  file handler under `<repo root>/logs/` (gitignored), both formatted with
+  the emitting file's path relative to the repo root, line number and
+  function name.
+- wired into `cce.main` at process startup, before the rest of the app is
+  imported.
+- domain-level logging at each ingestion stage (connect, list, extract,
+  paginate, send-to-index), added directly in the boundary modules rather
+  than here: `sources/service.py`, `connectors/structured/snowflake/
+  connector.py`, `connectors/unstructured/azure_blob/connector.py`,
+  `ingestion/orchestrator.py`, `integrations/agentic_plane/client.py`. A
+  blanket per-function-call tracer (`sys.setprofile` over every call in the
+  package) was tried and dropped — it produced call-graph noise with no
+  domain meaning, which is the opposite of what ingestion traceability
+  needs. Only counts/ids are logged, never row/document content or
+  credentials.
 
 Missing:
 - meaningful metrics exporter/backend;
-- distributed tracing/span implementation;
-- verified startup wiring for logging helper;
-- Langfuse/OpenTelemetry/event-stream behavior described by target product material.
+- distributed tracing/span implementation (`tracing.py` is still a
+  placeholder);
+- Langfuse/OpenTelemetry/event-stream behavior described by target product
+  material;
+- standalone scripts under `scripts/` are not wired (only the `cce.main`
+  server entry point calls `configure_logging()`); call it from a script's
+  own entry point if needed.
 
 ## Purpose
 
@@ -37,12 +56,13 @@ Those belong in `traceability/` and audit persistence.
 ### Current
 
 ```text
-optional caller -> configure_logging(level) -> logging.basicConfig
+cce.main (process start) -> configure_logging(LOG_LEVEL) -> root logger gets
+    console + rotating-file (logs/cce.log) handlers
+sources.service / connectors / ingestion.orchestrator / agentic_plane.client
+    -> logging.getLogger(__name__).info(...) at each real pipeline step
 metrics.increment(...) -> no-op
 tracing.current_span() -> None
 ```
-
-No verified startup wiring calls these helpers.
 
 ## Important Components
 

@@ -81,6 +81,23 @@ def _patched_key_der():
 
 class ConnectTests(unittest.TestCase):
 
+    def test_disabled_write_probe_returns_unverified_connection(self):
+        def no_probe_script(sql, params=None):
+            if "CREATE TEMPORARY TABLE" in sql:
+                raise AssertionError("write probe must not run")
+            return [], None
+
+        config = make_config()
+        config.write_probe_enabled = False
+        connector = SnowflakeConnector(
+            config,
+            driver_connect=lambda **kw: FakeConnection(no_probe_script),
+        )
+        with _patched_credential(), _patched_key_der():
+            connection = connector.connect()
+
+        self.assertFalse(connection.read_only_verified)
+
     def test_write_denied_returns_a_read_only_connection(self):
         fake_conn = FakeConnection(denied_write_script)
         connector = SnowflakeConnector(make_config(), driver_connect=lambda **kw: fake_conn)

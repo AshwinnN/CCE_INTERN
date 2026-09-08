@@ -28,10 +28,10 @@ class StructuredConnector(ABC):
 
     @abstractmethod
     def connect(self) -> "StructuredConnection":  # noqa: F821
-        """Establish a connection and prove it's read-only via a live
-        write-probe before returning.
+        """Establish a connection and, when enabled, prove it is read-only
+        via a live write probe before returning.
 
-        Returns: StructuredConnection (proven safe to use)
+        Returns: StructuredConnection (with read_only_verified indicating proof)
         Raises: cce.connectors.base.exceptions.StructuredConnectorException
         (ConnectionFailedError if the driver-level connect fails,
         WriteAccessDetectedError if the probe's write succeeded)

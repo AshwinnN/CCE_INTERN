@@ -37,6 +37,42 @@ def test_complete_passes_temperature_zero_and_model(monkeypatch):
     assert calls["prompt"] == "prompt"
 
 
+def test_complete_uses_litellm_provider_via_openai_protocol(monkeypatch):
+    calls = {}
+    module = types.ModuleType("langchain_openai")
+
+    class ChatOpenAI:
+        def __init__(self, **kwargs):
+            calls["kwargs"] = kwargs
+
+        def invoke(self, prompt):
+            calls["prompt"] = prompt
+            return types.SimpleNamespace(content="done via litellm")
+
+    module.ChatOpenAI = ChatOpenAI
+    monkeypatch.setitem(sys.modules, "langchain_openai", module)
+    monkeypatch.setenv("CCE_LLM_PROVIDER", "litellm")
+    monkeypatch.setenv("CCE_LLM_BASE_URL", "https://litellm.example/v1")
+    monkeypatch.setenv("CCE_LLM_API_KEY", "test-key")
+    monkeypatch.setenv("CCE_LLM_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("CCE_LLM_MAX_TOKENS", "256")
+
+    assert client.complete("prompt") == "done via litellm"
+    assert calls["kwargs"]["base_url"] == "https://litellm.example/v1"
+    assert calls["kwargs"]["api_key"] == "test-key"
+    assert calls["kwargs"]["model"] == "gpt-4o-mini"
+    assert calls["kwargs"]["temperature"] == 0
+    assert calls["kwargs"]["max_tokens"] == 256
+
+
+def test_complete_litellm_requires_base_url(monkeypatch):
+    monkeypatch.setenv("CCE_LLM_PROVIDER", "litellm")
+    monkeypatch.delenv("CCE_LLM_BASE_URL", raising=False)
+    monkeypatch.setenv("CCE_LLM_API_KEY", "test-key")
+    with pytest.raises(RuntimeError, match="CCE_LLM_BASE_URL"):
+        client.complete("hello")
+
+
 def test_complete_can_be_used_in_langgraph_node(monkeypatch):
     pytest.importorskip("langgraph.graph")
     from langgraph.graph import END, StateGraph

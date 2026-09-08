@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import threading
 import traceback
 import uuid
@@ -10,6 +11,9 @@ from cce.connectors.base.models import ConnectionConfig
 from cce.connectors.factory import ConnectorFactory
 from cce.ingestion.orchestrator import run_ingestion
 from cce.security.credentials import load_credential
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,8 +80,11 @@ class SourceService:
                 status="FAILED",
                 error={"code": "SOURCE_NOT_FOUND", "message": str(exc), "retryable": False},
             )
-        connector = self._build_connector(source)
+        connector = None
         try:
+            logger.info("Testing connection: source_id=%s adapter=%s kind=%s",
+                        source_id, source["adapter"], source["kind"])
+            connector = self._build_connector(source)
             connector.connect()
             if source["kind"] == "structured":
                 schema = (source.get("config") or {}).get("schema")
@@ -85,11 +92,13 @@ class SourceService:
                     connector.get_schema_card(schema, max_tables=1)
             else:
                 connector.list_objects()
+            logger.info("Connection test succeeded: source_id=%s", source_id)
             return SourceOperationResult(
                 source_id=str(source["source_id"]),
                 status="CONNECTED",
             )
         except Exception as exc:
+            logger.exception("Source connection test failed for source_id=%s", source_id)
             return SourceOperationResult(
                 source_id=str(source["source_id"]),
                 status="FAILED",
@@ -100,10 +109,11 @@ class SourceService:
                 },
             )
         finally:
-            try:
-                connector.close()
-            except Exception:
-                pass
+            if connector is not None:
+                try:
+                    connector.close()
+                except Exception:
+                    pass
 
     def trigger_ingestion(self, source_id: str) -> IngestionRunResult:
         try:
@@ -160,8 +170,13 @@ class SourceService:
         processed = 0
         failed = 0
         errors: list[str] = []
-        connector = self._build_connector(source)
+        connector = None
+        logger.info(
+            "Starting ingestion: run_id=%s source_id=%s adapter=%s kind=%s trace_id=%s",
+            run_id, source.get("source_id"), source["adapter"], source["kind"], trace_id,
+        )
         try:
+            connector = self._build_connector(source)
             connector.connect()
             if source["kind"] == "structured":
                 success, state = self._run_structured(source, connector, trace_id)
@@ -170,12 +185,31 @@ class SourceService:
                 errors.extend(state.get("errors", []))
             else:
                 listed = connector.list_objects((source.get("config") or {}).get("prefix"))
-                for obj in listed.get("objects", []):
+                objects = listed.get("objects", [])
+                max_files = (source.get("config") or {}).get("max_files")
+                if max_files is not None:
+                    max_files = int(max_files)
+                    if max_files < 1:
+                        raise ValueError("source config max_files must be at least 1")
+                    logger.info(
+                        "Applying max_files limit: run_id=%s listed=%d max_files=%d -> %d objects to process",
+                        run_id, len(objects), max_files, min(max_files, len(objects)),
+                    )
+                    objects = objects[:max_files]
+                logger.info("Processing %d objects for run_id=%s source_id=%s",
+                            len(objects), run_id, source.get("source_id"))
+                for index, obj in enumerate(objects, start=1):
+                    logger.info("Processing object %d/%d: object_id=%s run_id=%s",
+                                index, len(objects), obj.get("object_id"), run_id)
                     success, state = self._run_unstructured(source, connector, obj, trace_id)
                     processed += 1 if success else 0
                     failed += 0 if success else 1
                     errors.extend(state.get("errors", []))
             status = "SUCCESS" if failed == 0 else "FAILED"
+            logger.info(
+                "Ingestion finished: run_id=%s status=%s processed=%d failed=%d",
+                run_id, status, processed, failed,
+            )
             self.source_repository.update_ingestion_run(
                 run_id,
                 status,
@@ -184,6 +218,11 @@ class SourceService:
                 error_message="; ".join(errors) if errors else None,
             )
         except Exception as exc:
+            logger.exception(
+                "Source ingestion failed for run_id=%s source_id=%s",
+                run_id,
+                source.get("source_id"),
+            )
             self.source_repository.update_ingestion_run(
                 run_id,
                 "FAILED",
@@ -192,10 +231,11 @@ class SourceService:
                 error_message="%s\n%s" % (exc, traceback.format_exc(limit=3)),
             )
         finally:
-            try:
-                connector.close()
-            except Exception:
-                pass
+            if connector is not None:
+                try:
+                    connector.close()
+                except Exception:
+                    pass
 
     def _run_unstructured(self, source: dict, connector, obj: dict, trace_id: str):
         event = _event_for_object(source, obj, trace_id)
@@ -233,6 +273,8 @@ class SourceService:
 
     def _build_connector(self, source: dict):
         config = source.get("config") or {}
+        logger.info("Building connector: source_id=%s adapter=%s kind=%s",
+                    source.get("source_id"), source["adapter"], source["kind"])
         if source["kind"] == "structured":
             return ConnectorFactory.create(
                 ConnectionConfig(
@@ -247,6 +289,7 @@ class SourceService:
                     max_rows=int(config.get("max_rows", 1000)),
                     login_timeout_s=int(config.get("login_timeout_s", 20)),
                     network_timeout_s=int(config.get("network_timeout_s", 30)),
+                    write_probe_enabled=bool(config.get("write_probe_enabled", False)),
                 )
             )
         if source["adapter"] == "local-fs":

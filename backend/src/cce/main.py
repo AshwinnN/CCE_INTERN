@@ -1,14 +1,20 @@
 """CCE backend entry point."""
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from cce.observability.config import LOG_LEVEL
+from cce.observability.logging import configure_logging
+
+configure_logging(LOG_LEVEL)
+
 from threading import Thread
 
 from cce.bootstrap import build_application
 from cce.config.settings import load_settings
 from cce.rpc.server import serve
 
-from dotenv import load_dotenv
-
-load_dotenv()
 
 def _serve_http(app) -> None:
     import uvicorn

@@ -11,7 +11,6 @@ from agenticplane.types import MemoryType
 
 from cce.integrations.agentic_plane.bridge import AgenticPlaneMemoryBridge
 from cce.integrations.agentic_plane.chunking import payload_chunks
-from cce.integrations.agentic_plane.errors import GraphExtractionError
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +26,7 @@ class AgenticPlaneClient:
         timeout: int = 30,
         max_retries: int = 3,
         agent_id: str = "cce-ingestion",
+        graph_enabled: bool = True,
         plane_factory: Callable[..., Any] | None = None,
         bridge_repository: Any | None = None,
     ) -> None:
@@ -38,6 +38,7 @@ class AgenticPlaneClient:
             raise ValueError("AgenticPlane agent ID is required")
 
         self._agent_id = agent_id
+        self._graph_enabled = graph_enabled
         factory = plane_factory or AgenticPlane
         self._plane = factory(
             api_key=api_key,
@@ -59,15 +60,21 @@ class AgenticPlaneClient:
     def index(self, payload: dict) -> dict:
         document_id = payload["document_id"]
         if payload.get("change_type") == "deleted":
+            logger.info("AgenticPlane index: document_id=%s change_type=deleted -> delete()", document_id)
             return self.delete(document_id)
 
         source_id = payload["source_id"]
         chunks = list(payload_chunks(payload))
+        logger.info(
+            "AgenticPlane index: document_id=%s source_id=%s agent_id=%s chunked into %d chunks",
+            document_id, source_id, self._agent_id, len(chunks),
+        )
 
         # AgenticPlane has no document-level replacement operation. Clear the
         # previous memory IDs recorded by CCE before storing the new revision.
         self.delete(document_id)
         if not chunks:
+            logger.info("AgenticPlane index: document_id=%s has no chunks, nothing to send", document_id)
             return {
                 "status": "indexed",
                 "indexed": 0,
@@ -94,13 +101,24 @@ class AgenticPlaneClient:
             }
             for chunk in chunks
         ]
+        logger.info(
+            "AgenticPlane index: document_id=%s sending %d chunks to memory.store_batch "
+            "(vector store), agent_id=%s",
+            document_id, len(items), self._agent_id,
+        )
         memory_ids = [str(memory_id) for memory_id in self._plane.memory.store_batch(items)]
         if len(memory_ids) != len(items):
+            logger.error(
+                "AgenticPlane index: document_id=%s store_batch returned %d memory IDs for %d chunks",
+                document_id, len(memory_ids), len(items),
+            )
             self._delete_new_memories(memory_ids)
             raise RuntimeError(
                 "AgenticPlane store_batch returned %d memory IDs for %d chunks"
                 % (len(memory_ids), len(items))
             )
+        logger.info("AgenticPlane index: document_id=%s stored %d chunks in vector store, memory_ids=%s",
+                    document_id, len(memory_ids), memory_ids)
 
         try:
             self._bridge.save_document(
@@ -116,26 +134,36 @@ class AgenticPlaneClient:
 
         entity_count = 0
         relationship_count = 0
-        for item, memory_id in zip(items, memory_ids):
-            try:
-                extraction = self._plane.graph.extract_and_store(
-                    content=item["content"],
-                    agent_id=self._agent_id,
-                    memory_id=memory_id,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "AgenticPlane graph extraction failed for memory_id=%s; "
-                    "verify GRAPH_ENABLED=true and that ArcadeDB is running",
-                    memory_id,
-                )
-                raise GraphExtractionError(
-                    "AgenticPlane graph extraction failed for memory %s; verify "
-                    "GRAPH_ENABLED=true and that ArcadeDB is running" % memory_id
-                ) from exc
-            entity_count += len(extraction.entities)
-            relationship_count += len(extraction.relationships)
+        if self._graph_enabled:
+            logger.info("AgenticPlane index: document_id=%s sending %d chunks to graph.extract_and_store",
+                        document_id, len(items))
+            for item, memory_id in zip(items, memory_ids):
+                try:
+                    extraction = self._plane.graph.extract_and_store(
+                        content=item["content"],
+                        agent_id=self._agent_id,
+                        memory_id=memory_id,
+                    )
+                except Exception:
+                    # Vector storage for this chunk already succeeded above, so a
+                    # graph extraction failure (e.g. GRAPH_ENABLED=false on the
+                    # gateway, or a transient error for this one chunk) is
+                    # logged and skipped rather than failing the whole index().
+                    logger.exception(
+                        "AgenticPlane graph extraction failed for memory_id=%s; "
+                        "skipping graph extraction for this chunk (verify "
+                        "GRAPH_ENABLED=true and that ArcadeDB is running)",
+                        memory_id,
+                    )
+                    continue
+                entity_count += len(extraction.entities)
+                relationship_count += len(extraction.relationships)
 
+        logger.info(
+            "AgenticPlane index: document_id=%s complete: indexed=%d entities_extracted=%d "
+            "relationships_extracted=%d",
+            document_id, len(memory_ids), entity_count, relationship_count,
+        )
         return {
             "status": "indexed",
             "indexed": len(memory_ids),
@@ -144,12 +172,18 @@ class AgenticPlaneClient:
         }
 
     def search(self, query: str, *, limit: int = 5) -> list[dict]:
+        logger.info("AgenticPlane search: agent_id=%s limit=%d query=%r", self._agent_id, limit, query)
         result = self._plane.memory.search(self._agent_id, query, limit=limit)
+        hits = [self._search_hit(record) for record in result.results]
+        logger.info("AgenticPlane search: returned %d hits", len(hits))
         # Boundary convention: score is cosine similarity, so higher is better.
-        return [self._search_hit(record) for record in result.results]
+        return hits
 
     def delete(self, document_id: str) -> dict:
         references = self._bridge.list_document(document_id)
+        if references:
+            logger.info("AgenticPlane delete: document_id=%s removing %d memory references",
+                        document_id, len(references))
         for reference in references:
             self._plane.memory.delete(
                 reference["memory_id"],
@@ -167,11 +201,17 @@ class AgenticPlaneClient:
         depth: int = 2,
         limit: int = 10,
     ) -> dict:
+        logger.info("AgenticPlane graph query: agent_id=%s depth=%d limit=%d query=%r",
+                    agent_id or self._agent_id, depth, limit, query)
         result = self._plane.graph.graphrag_search(
             query,
             agent_id=agent_id or self._agent_id,
             depth=depth,
             limit=limit,
+        )
+        logger.info(
+            "AgenticPlane graph query: returned %d entities, %d relationships, %d memories",
+            len(result.entities), len(result.relationships), len(result.memories),
         )
         return {
             "entities": [_plain_sdk_model(item) for item in result.entities],

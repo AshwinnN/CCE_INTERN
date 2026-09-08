@@ -42,6 +42,7 @@ def build_application(settings: Settings) -> Application:
         initialize_control_postgres(
             settings.database_url,
             timeout_seconds=settings.postgres_wait_timeout_seconds,
+            index_backend=settings.index_backend,
         )
 
     source_repository = PostgresSourceRepository(settings.database_url)
@@ -54,6 +55,7 @@ def build_application(settings: Settings) -> Application:
             timeout=settings.agenticplane_timeout,
             max_retries=settings.agenticplane_max_retries,
             agent_id=settings.agenticplane_agent_id,
+            graph_enabled=settings.agenticplane_graph_enabled,
             dsn=settings.database_url,
         )
         if settings.index_backend == "agentic_plane"

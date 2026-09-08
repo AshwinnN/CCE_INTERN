@@ -26,9 +26,13 @@ MIGRATION_FILES = (
     "009_local_index_exact_search.sql",
     "011_agentic_plane_refs.sql",
 )
+LOCAL_INDEX_MIGRATION_FILES = {
+    "008_local_index.sql",
+    "009_local_index_exact_search.sql",
+}
 
 
-def migration_paths() -> Iterable[Path]:
+def migration_paths(index_backend: str = "local") -> Iterable[Path]:
     migration_dir = Path(
         os.environ.get(
             "CCE_MIGRATION_DIR",
@@ -40,6 +44,8 @@ def migration_paths() -> Iterable[Path]:
         )
     )
     for name in MIGRATION_FILES:
+        if index_backend != "local" and name in LOCAL_INDEX_MIGRATION_FILES:
+            continue
         yield migration_dir / name
 
 
@@ -62,13 +68,16 @@ def wait_for_postgres(dsn: str, timeout_seconds: int) -> None:
     )
 
 
-def apply_control_schema(dsn: str) -> None:
+def apply_control_schema(dsn: str, index_backend: str = "local") -> None:
     with psycopg2.connect(dsn) as conn:
         conn.autocommit = False
         with conn.cursor() as cur:
-            for path in migration_paths():
+            for path in migration_paths(index_backend):
+                sql = path.read_text(encoding="utf-8")
+                if not sql.strip():
+                    continue
                 try:
-                    cur.execute(path.read_text(encoding="utf-8"))
+                    cur.execute(sql)
                 except psycopg2.Error as exc:
                     if path.name == "008_local_index.sql":
                         raise RuntimeError(
@@ -80,6 +89,8 @@ def apply_control_schema(dsn: str) -> None:
         conn.commit()
 
 
-def initialize_control_postgres(dsn: str, timeout_seconds: int) -> None:
+def initialize_control_postgres(
+    dsn: str, timeout_seconds: int, index_backend: str = "local"
+) -> None:
     wait_for_postgres(dsn, timeout_seconds)
-    apply_control_schema(dsn)
+    apply_control_schema(dsn, index_backend)

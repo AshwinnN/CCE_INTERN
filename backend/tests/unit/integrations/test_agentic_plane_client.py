@@ -1,9 +1,6 @@
 from types import SimpleNamespace
 
-import pytest
-
 from cce.integrations.agentic_plane.client import AgenticPlaneClient
-from cce.integrations.agentic_plane.errors import GraphExtractionError
 
 
 class FakeMemory:
@@ -27,15 +24,18 @@ class FakeMemory:
 
 
 class FakeGraph:
-    def __init__(self):
+    def __init__(self, *, fail_for=()):
         self.extractions = []
         self.search_calls = []
         self.search_result = SimpleNamespace(
             entities=[], relationships=[], memories=[]
         )
+        self._fail_for = set(fail_for)
 
     def extract_and_store(self, *, content, agent_id, memory_id):
         self.extractions.append((content, agent_id, memory_id))
+        if content in self._fail_for:
+            raise RuntimeError("graph extraction failed for %r" % content)
         return SimpleNamespace(
             entities=[SimpleNamespace(entity_id="entity-" + memory_id)],
             relationships=[SimpleNamespace(relationship_id="rel-" + memory_id)],
@@ -47,9 +47,9 @@ class FakeGraph:
 
 
 class FakePlane:
-    def __init__(self):
+    def __init__(self, *, graph=None):
         self.memory = FakeMemory()
-        self.graph = FakeGraph()
+        self.graph = graph if graph is not None else FakeGraph()
         self.closed = False
 
     def close(self):
@@ -83,7 +83,7 @@ class FakeBridge:
         return len(rows)
 
 
-def _client(plane, bridge, constructor_calls=None):
+def _client(plane, bridge, constructor_calls=None, *, graph_enabled=True):
     def factory(**kwargs):
         if constructor_calls is not None:
             constructor_calls.append(kwargs)
@@ -95,6 +95,7 @@ def _client(plane, bridge, constructor_calls=None):
         timeout=17,
         max_retries=4,
         agent_id="cce-ingestion",
+        graph_enabled=graph_enabled,
         dsn="postgresql://unused",
         plane_factory=factory,
         bridge_repository=bridge,
@@ -313,23 +314,52 @@ def test_graph_maps_sdk_result_without_synthesis():
     }
 
 
-def test_index_surfaces_graph_failure_after_persisting_memory_reference():
+def test_index_skips_graph_extraction_when_disabled():
     plane = FakePlane()
     bridge = FakeBridge()
+    client = _client(plane, bridge, graph_enabled=False)
 
-    def fail_extraction(**kwargs):
-        raise RuntimeError("graph disabled")
+    result = client.index(
+        {
+            "document_id": "doc-1",
+            "source_id": "source-1",
+            "blocks": [{"id": "b1", "type": "text", "text": "some text"}],
+        }
+    )
 
-    plane.graph.extract_and_store = fail_extraction
+    assert result == {
+        "status": "indexed",
+        "indexed": 1,
+        "entities_extracted": 0,
+        "relationships_extracted": 0,
+    }
+    assert plane.graph.extractions == []
+    assert bridge.saved[0]["memory_ids"] == ["memory-0"]
+
+
+def test_index_graph_extraction_failure_is_non_fatal_per_chunk():
+    plane = FakePlane(graph=FakeGraph(fail_for={"bad chunk"}))
+    bridge = FakeBridge()
     client = _client(plane, bridge)
 
-    with pytest.raises(GraphExtractionError, match="GRAPH_ENABLED"):
-        client.index(
-            {
-                "document_id": "doc-1",
-                "source_id": "source-1",
-                "blocks": [{"id": "b1", "type": "text", "text": "Ada built it"}],
-            }
-        )
+    result = client.index(
+        {
+            "document_id": "doc-1",
+            "source_id": "source-1",
+            "blocks": [
+                {"id": "b1", "type": "text", "text": "bad chunk"},
+                {"id": "b2", "type": "text", "text": "good chunk"},
+            ],
+        }
+    )
 
-    assert bridge.saved[0]["memory_ids"] == ["memory-0"]
+    # Vector storage for both chunks still succeeds; only the failing chunk's
+    # graph extraction is skipped.
+    assert result == {
+        "status": "indexed",
+        "indexed": 2,
+        "entities_extracted": 1,
+        "relationships_extracted": 1,
+    }
+    assert [call[0] for call in plane.graph.extractions] == ["bad chunk", "good chunk"]
+    assert bridge.saved[0]["memory_ids"] == ["memory-0", "memory-1"]

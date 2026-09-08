@@ -17,6 +17,12 @@ connects to the registered source, lists the available objects/schema and calls
 For unstructured sources, the service currently composes executable `local-fs`
 and `azure-blob` connectors. For structured sources, it composes the existing
 Snowflake connector and schema-card ingestion path.
+An unstructured source may set `config.max_files` to a positive integer to cap
+each manually triggered run. Azure Blob `config.prefix` is applied recursively
+to all blob names beneath that virtual-directory prefix.
+Connector construction and connection are inside the source worker's failure
+boundary, so Azure configuration/authentication failures are logged and
+persisted on the ingestion run as `FAILED`.
 
 Unstructured document parsing is selected by MIME type through
 `ParserFactory`: PDFs use `pypdfium2`, Word documents use `python-docx` and

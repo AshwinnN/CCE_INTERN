@@ -23,3 +23,4 @@ class ConnectionConfig:
     max_rows: int = 1000
     login_timeout_s: int = 20
     network_timeout_s: int = 30
+    write_probe_enabled: bool = True

@@ -1,23 +1,50 @@
+import logging
 import os
 import tempfile
 from typing import Iterator, Tuple
 from azure.storage.blob import BlobServiceClient
 from cce.connectors.base.source import SourceConnection, SourceConnector
+from cce.connectors.base.exceptions import ConnectionFailedError
 from cce.ingestion.models import DocumentMetadata
 from cce.ingestion.parsers.factory import ParserFactory
 from cce.ingestion.models import ProcessingResult, ProcessingStatus
 from cce.ingestion.change_detection.file_detection import detect_mime_type
 
+logger = logging.getLogger(__name__)
+
+# Azure SDK default page size for list_blobs(); pages are logged individually
+# so a large container's listing is visible without dumping every blob name.
+_LIST_PAGE_SIZE = 5000
+
+
 class AzureBlobSource(SourceConnector):
     def __init__(self, connection_string: str, container_name: str, source_id: str = "azure-blob"):
+        if not connection_string or not connection_string.strip():
+            raise ConnectionFailedError("Azure Blob connection string is empty")
+        if not container_name or not container_name.strip():
+            raise ConnectionFailedError("Azure Blob container name is empty")
         self.source_id = source_id
         self.connection_string = connection_string
         self.container_name = container_name
-        self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        try:
+            self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        except Exception as exc:
+            raise ConnectionFailedError(
+                "Azure Blob client initialization failed; verify the configured credential reference"
+            ) from exc
         self.container_client = self.blob_service_client.get_container_client(container_name)
 
     def connect(self) -> SourceConnection:
-        self.container_client.get_container_properties()
+        logger.info("Connecting to Azure Blob container=%s", self.container_name)
+        try:
+            self.container_client.get_container_properties()
+        except Exception as exc:
+            logger.error("Azure Blob connection failed for container=%s: %s", self.container_name, exc)
+            raise ConnectionFailedError(
+                "Azure Blob connection failed for container %r: %s"
+                % (self.container_name, exc)
+            ) from exc
+        logger.info("Connected to Azure Blob container=%s source_id=%s", self.container_name, self.source_id)
         return SourceConnection(
             connector=self,
             connection_id=f"azure-blob:{self.container_name}",
@@ -26,9 +53,14 @@ class AzureBlobSource(SourceConnector):
         )
 
     def list_objects(self, cursor=None):
+        logger.info(
+            "Listing blobs: container=%s prefix=%r (page_size=%d)",
+            self.container_name, cursor, _LIST_PAGE_SIZE,
+        )
         objects = []
-        for blob in self.container_client.list_blobs(name_starts_with=cursor):
-            objects.append(
+        pages = self.container_client.list_blobs(name_starts_with=cursor).by_page()
+        for page_number, page in enumerate(pages, start=1):
+            page_objects = [
                 {
                     "object_id": blob.name,
                     "object_type": getattr(getattr(blob, "content_settings", None), "content_type", None) or "application/octet-stream",
@@ -37,11 +69,22 @@ class AzureBlobSource(SourceConnector):
                     "content_hash": getattr(blob, "etag", None) or "",
                     "modified_at": getattr(blob, "last_modified", None),
                 }
+                for blob in page
+            ]
+            objects.extend(page_objects)
+            logger.info(
+                "Listed page %d: %d blobs (running total=%d) container=%s",
+                page_number, len(page_objects), len(objects), self.container_name,
             )
+        logger.info("Listing complete: %d blobs total from container=%s prefix=%r",
+                    len(objects), self.container_name, cursor)
         return {"objects": objects, "next_cursor": None}
 
     def fetch_object(self, object_id: str) -> bytes:
-        return self.container_client.get_blob_client(object_id).download_blob().readall()
+        logger.info("Fetching blob object_id=%s from container=%s", object_id, self.container_name)
+        data = self.container_client.get_blob_client(object_id).download_blob().readall()
+        logger.info("Fetched blob object_id=%s: %d bytes", object_id, len(data))
+        return data
 
     def close(self) -> None:
         return None

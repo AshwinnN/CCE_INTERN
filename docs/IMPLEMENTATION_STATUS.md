@@ -27,6 +27,7 @@ Status: **IMPLEMENTED**
 Evidence:
 - `backend/src/cce/connectors/structured/snowflake/connector.py::SnowflakeConnector.connect()`
 - `_run_write_probe()` performs `CREATE TEMPORARY TABLE` and rejects a credential if the write succeeds.
+- The manual `SourceService` ingestion path currently disables this probe by default and marks its connection `read_only_verified=false`; set source config `write_probe_enabled=true` to restore it.
 - `ConnectorFactory` registers the Snowflake connector.
 
 ### Snowflake schema discovery — SF-02
@@ -169,6 +170,7 @@ Implemented:
 - gRPC and HTTP source endpoints delegate to `cce.sources.service.SourceService`;
 - `RegisterSource` persists source kind, credential reference and non-secret config;
 - `GET /sources` lists registered sources through the source service/repository path without resolving credentials;
+- Azure Blob configuration/connect failures are surfaced by source tests and finalize ingestion runs as `FAILED` instead of leaving stale `RUNNING` rows;
 - `GetIngestionStatus` reads durable run state from PostgreSQL.
 
 Missing:

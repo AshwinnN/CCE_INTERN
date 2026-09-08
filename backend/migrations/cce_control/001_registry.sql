@@ -6,7 +6,7 @@
 -- Database vs Catalog": namespace_type carries the vendor-specific label
 -- so a query can stay vendor-agnostic ("all namespaces for this source")
 -- without ever branching on adapter name.
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS cce_source (
     source_id     UUID PRIMARY KEY,

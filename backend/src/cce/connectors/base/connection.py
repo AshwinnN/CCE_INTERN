@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""A proven-safe handle to a structured source. Only ever constructed after
-a real write-probe has denied a write -- see each adapter's connect()."""
+"""A structured-source handle that records whether read-only access was proven."""
 from datetime import datetime, timezone
 
 
 class StructuredConnection:
-    def __init__(self, connector: "StructuredConnector", connection_id: str):  # noqa: F821
+    def __init__(
+        self,
+        connector: "StructuredConnector",  # noqa: F821
+        connection_id: str,
+        *,
+        read_only_verified: bool = True,
+    ):
         self.connector = connector
         self.connection_id = connection_id
-        self.read_only_verified = True   # only ever true -- connect() raises rather than
-                                          # returning a StructuredConnection when the probe fails
+        self.read_only_verified = read_only_verified
         self.created_at = datetime.now(timezone.utc)

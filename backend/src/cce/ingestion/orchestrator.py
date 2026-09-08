@@ -114,13 +114,18 @@ def route_by_source(state: IngestionState) -> IngestionState:
 def fetch_unstructured_node(state: IngestionState) -> IngestionState:
     """Download raw bytes from the unstructured source using the connection
     handle the Connector Agent already proved read-only."""
+    object_id = state["event"]["object"]["object_id"]
     try:
-        object_id = state["event"]["object"]["object_id"]
+        logger.info("fetch_unstructured: object_id=%s adapter=%s trace_id=%s",
+                    object_id, state["adapter"], state.get("trace_id"))
         state["raw_content"] = _fetch_unstructured_bytes(
             state["adapter"], state["connection_handle"], object_id,
             state.get("_fetch_unstructured"),
         )
+        logger.info("fetch_unstructured: object_id=%s fetched %d bytes",
+                    object_id, len(state["raw_content"] or b""))
     except Exception as e:
+        logger.error("fetch_unstructured failed: object_id=%s error=%s", object_id, e)
         state["errors"] = state["errors"] + ["fetch_unstructured: %s" % e]
     return state
 
@@ -141,12 +146,20 @@ def _default_fetch_structured(adapter: str, connection_handle: dict, schema_scop
 
 def fetch_structured_node(state: IngestionState) -> IngestionState:
     """Fetch a schema card (schema + sample rows) for the structured lane."""
+    schema_scope = state.get("schema_scope", [])
     try:
+        logger.info("fetch_structured: adapter=%s schema_scope=%s trace_id=%s",
+                    state["adapter"], schema_scope, state.get("trace_id"))
         state["raw_content"] = _fetch_structured_card(
-            state["adapter"], state["connection_handle"], state.get("schema_scope", []),
+            state["adapter"], state["connection_handle"], schema_scope,
             state.get("_fetch_structured") or _default_fetch_structured,
         )
+        tables = (state["raw_content"] or {}).get("tables", [])
+        logger.info("fetch_structured: schema=%s fetched %d tables",
+                    (state["raw_content"] or {}).get("schema"), len(tables))
     except Exception as e:
+        logger.error("fetch_structured failed: adapter=%s schema_scope=%s error=%s",
+                     state["adapter"], schema_scope, e)
         state["errors"] = state["errors"] + ["fetch_structured: %s" % e]
     return state
 
@@ -255,7 +268,13 @@ def persist_structured_metadata_node(state: IngestionState) -> IngestionState:
                 })
 
         state["metadata_snapshot_id"] = snapshot_id
+        logger.info(
+            "persist_structured_metadata: snapshot_id=%s schema=%s tables=%d columns=%d",
+            snapshot_id, schema_name, len(tables),
+            sum(len(t.get("columns", [])) for t in tables),
+        )
     except Exception as e:
+        logger.warning("persist_structured_metadata failed (non-fatal): %s", e)
         state["warnings"] = state["warnings"] + ["persist_structured_metadata: %s" % e]
     finally:
         if owns_repo and repo is not None:
@@ -288,8 +307,11 @@ def parse_document_node(state: IngestionState) -> IngestionState:
             tmp_path = tmp.name
 
         mime_type = detect_mime_type(tmp_path)
+        logger.info("parse_document: object_id=%s mime_type=%s size=%d bytes",
+                    object_id, mime_type, len(raw))
         parser = ParserFactory.get_parser(mime_type)
         if parser is None:
+            logger.error("parse_document: object_id=%s unsupported mime_type=%s", object_id, mime_type)
             state["errors"] = state["errors"] + [
                 "parse_document: unsupported mime type %s" % mime_type]
             return state
@@ -303,13 +325,19 @@ def parse_document_node(state: IngestionState) -> IngestionState:
         result = parser.parse(tmp_path, doc_metadata)
         if result.status.value in ("SUCCESS", "PARTIAL"):
             state["parsed_doc"] = result.document.model_dump(mode="json")
+            elements = state["parsed_doc"].get("elements", [])
+            logger.info("parse_document: object_id=%s status=%s -> %d elements",
+                        object_id, result.status.value, len(elements))
             if result.warnings:
                 state["warnings"] = state["warnings"] + list(result.warnings)
         else:
+            logger.error("parse_document: object_id=%s parser reported status=%s",
+                         object_id, result.status.value)
             state["errors"] = state["errors"] + (
                 list(result.errors) if result.errors
                 else ["parse_document: parser reported %s" % result.status.value])
     except Exception as e:
+        logger.error("parse_document failed: object_id=%s error=%s", object_id, e)
         state["errors"] = state["errors"] + ["parse_document: %s" % e]
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -329,7 +357,11 @@ def normalize_document_node(state: IngestionState) -> IngestionState:
             else state.get("raw_content")
         state["normalized_doc"] = normalize_to_canonical(
             source_payload, state["kind"], source_database=state["adapter"])
+        elements = (state["normalized_doc"] or {}).get("elements", [])
+        logger.info("normalize_document: kind=%s -> %d canonical elements",
+                    state["kind"], len(elements))
     except Exception as e:
+        logger.error("normalize_document failed: kind=%s error=%s", state["kind"], e)
         state["errors"] = state["errors"] + ["normalize_document: %s" % e]
     return state
 
@@ -454,10 +486,21 @@ def emit_to_sdk_node(state: IngestionState) -> IngestionState:
             "dlp_verdict": state.get("dlp_verdict"),
             "trace_id": state["trace_id"],
         }
+        logger.info(
+            "emit_to_sdk: document_id=%s source_id=%s change_type=%s blocks=%d "
+            "sensitivity=%s trace_id=%s",
+            payload["document_id"], payload["source_id"], payload["change_type"],
+            len(payload["blocks"]), (payload.get("dlp_verdict") or {}).get("sensitivity"),
+            payload["trace_id"],
+        )
         emit_fn = state.get("_sdk_emit") or _default_sdk_emit
         state["sdk_response"] = emit_fn(payload)
         state["ready_for_sdk"] = True
+        logger.info("emit_to_sdk: document_id=%s response=%s",
+                    payload["document_id"], state["sdk_response"])
     except Exception as e:
+        logger.error("emit_to_sdk failed: document_id=%s error=%s",
+                     event.get("object", {}).get("object_id"), e)
         state["errors"] = state["errors"] + ["emit_to_sdk: %s" % e]
         state["ready_for_sdk"] = False
     return state
@@ -483,7 +526,10 @@ def checkpoint_node(state: IngestionState) -> IngestionState:
             "trace_id": state["trace_id"],
         }
         state["ingestion_checkpoint_id"] = store.save(state["source_id"], object_id, checkpoint_data)
+        logger.info("checkpoint: object_id=%s status=%s checkpoint_id=%s",
+                    object_id, checkpoint_data["status"], state["ingestion_checkpoint_id"])
     except Exception as e:
+        logger.warning("checkpoint failed (non-fatal): %s", e)
         state["warnings"] = state["warnings"] + ["checkpoint: %s" % e]
     return state
 

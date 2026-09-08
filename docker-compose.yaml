@@ -21,22 +21,18 @@ services:
     build:
       context: .
       dockerfile: deploy/docker/Dockerfile.backend
+    env_file:
+      - backend/.env
     environment:
-      CCE_ENVIRONMENT: development
       CCE_GRPC_HOST: 0.0.0.0
-      CCE_GRPC_PORT: "50051"
-      CCE_HTTP_ENABLED: "true"
-      CCE_HTTP_PORT: "8080"
       CCE_CONTROL_DATABASE_URL: postgresql://cce_admin:cce_password@postgres:5432/cce_control
       CCE_MIGRATE_ON_STARTUP: "true"
       CCE_MIGRATION_DIR: /app/backend/migrations/cce_control
       CCE_POSTGRES_WAIT_TIMEOUT_SECONDS: "60"
       CCE_CHECKPOINT_STORE_PATH: /app/.ingestion_checkpoints
-      CCE_INDEX_BACKEND: local
-      CCE_LOCAL_INDEX_EMBEDDING_MODE: hash
     ports:
-      - "50051:50051"
-      - "8080:8080"
+      - "${CCE_GRPC_PORT:-50051}:${CCE_GRPC_PORT:-50051}"
+      - "${CCE_HTTP_PORT:-8081}:${CCE_HTTP_PORT:-8081}"
     depends_on:
       postgres:
         condition: service_healthy

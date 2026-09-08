@@ -4,11 +4,10 @@
 Replaces skill-strucutred_source_connect for this adapter: that skill's
 write-probe was a caller-supplied boolean (`_probe_write_succeeds`) that
 production code never actually set, so its STR03 "prove read-only with a
-live write probe" guarantee was never enforced end to end. connect() here
-runs a real CREATE TEMPORARY TABLE probe against a real connection --
-same technique tools/verify_snowflake_connection.py already validated
-live -- and raises rather than returning a handle when the probe's write
-succeeds.
+live write probe" guarantee was never enforced end to end. The connector can
+run a real CREATE TEMPORARY TABLE probe against a real connection and rejects
+write-capable credentials when it is enabled. Manual server ingestion may
+disable the probe; that connection is explicitly marked unverified.
 
 `driver_connect` is injected (default: the real snowflake.connector.connect)
 so tests can supply a fake DB-API connection without live credentials or
@@ -16,6 +15,7 @@ network access -- the same fixture-injection convention every other
 live-driver touchpoint in this repo already uses (change_capture.py's
 object_lister/catalog_lister, ingestion's azure blob client).
 """
+import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,6 +24,8 @@ from cce.connectors.base.connector import StructuredConnector
 from cce.connectors.base.exceptions import ConnectionFailedError, NotConnectedError, WriteAccessDetectedError
 from cce.connectors.base.models import ConnectionConfig
 from cce.security.credentials import load_snowflake_keypair_credential
+
+logger = logging.getLogger(__name__)
 
 PROBE_TABLE = "__CCE_WRITE_PROBE__"
 
@@ -58,6 +60,10 @@ class SnowflakeConnector(StructuredConnector):
         self._connection = None
 
     def connect(self) -> StructuredConnection:
+        logger.info(
+            "Connecting to Snowflake: account=%s database=%s schema=%s warehouse=%s",
+            self.config.account_id, self.config.database, self.config.schema, self.config.warehouse,
+        )
         try:
             credential = load_snowflake_keypair_credential(self.config.credential_ref)
             private_key = _private_key_der(credential["private_key_pem"], credential["passphrase"])
@@ -73,19 +79,32 @@ class SnowflakeConnector(StructuredConnector):
                 network_timeout=self.config.network_timeout_s,
             )
         except Exception as e:
+            logger.error("Snowflake connect failed: account=%s error=%s", self.config.account_id, e)
             raise ConnectionFailedError("snowflake connect failed: %s" % e) from e
 
-        if self._run_write_probe():
-            # Write succeeded -- this credential is NOT read-only. Close
-            # before raising: a rejected connector must not leak a live
-            # session, and a caller must never receive a handle for it.
-            self.close()
-            raise WriteAccessDetectedError(
-                "write-probe succeeded on account %r -- credential is not read-only"
-                % self.config.account_id)
+        if self.config.write_probe_enabled:
+            logger.info("Running write-probe on account=%s (expecting denial for read-only credentials)",
+                        self.config.account_id)
+            if self._run_write_probe():
+                # Write succeeded -- this credential is NOT read-only. Close
+                # before raising: a rejected connector must not leak a live
+                # session, and a caller must never receive a handle for it.
+                logger.error("Write-probe succeeded on account=%s -- credential is NOT read-only, rejecting",
+                             self.config.account_id)
+                self.close()
+                raise WriteAccessDetectedError(
+                    "write-probe succeeded on account %r -- credential is not read-only"
+                    % self.config.account_id)
+            logger.info("Write-probe denied on account=%s -- read-only confirmed", self.config.account_id)
 
         connection_id = "conn_%s_%d" % (self.config.account_id, int(time.time()))
-        return StructuredConnection(self, connection_id)
+        logger.info("Connected to Snowflake: account=%s connection_id=%s read_only_verified=%s",
+                    self.config.account_id, connection_id, self.config.write_probe_enabled)
+        return StructuredConnection(
+            self,
+            connection_id,
+            read_only_verified=self.config.write_probe_enabled,
+        )
 
     def _run_write_probe(self) -> bool:
         """Attempts CREATE TEMPORARY TABLE. Returns True if the write

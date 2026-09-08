@@ -73,6 +73,7 @@ def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
     root = tmp_path / "docs"
     root.mkdir()
     (root / "hello.txt").write_text("searchable synthetic content", encoding="utf-8")
+    (root / "ignored.txt").write_text("outside the configured limit", encoding="utf-8")
 
     repo = InMemoryRepo()
     index = FakeIndex()
@@ -88,7 +89,11 @@ def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
         source_id="docs",
         credential_ref="",
         kind="unstructured",
-        config={"root_path": str(root), "password": "must-not-leak"},
+        config={
+            "root_path": str(root),
+            "max_files": 1,
+            "password": "must-not-leak",
+        },
     )
 
     assert service.list_sources() == [
@@ -98,7 +103,11 @@ def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
             "account_id": "docs",
             "kind": "unstructured",
             "credential_ref": None,
-            "config": {"root_path": str(root), "password": "[REDACTED]"},
+            "config": {
+                "root_path": str(root),
+                "max_files": 1,
+                "password": "[REDACTED]",
+            },
             "enabled": True,
             "created_at": None,
             "updated_at": None,
@@ -111,3 +120,36 @@ def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
     assert result.objects_processed == 1
     assert index.payloads[0]["blocks"][0]["text"] == "searchable synthetic content"
     assert index.payloads[0]["source_ref"].endswith("hello.txt")
+
+
+def test_connector_build_failure_is_returned_and_persisted(monkeypatch):
+    repo = InMemoryRepo()
+    service = SourceService(
+        source_repository=repo,
+        metadata_repository=None,
+        checkpoint_store=MemoryCheckpoint(),
+        index_client=FakeIndex(),
+        run_async=False,
+    )
+    registered = service.register_source(
+        adapter="azure-blob",
+        source_id="broken-blob",
+        credential_ref="env://missing",
+        kind="unstructured",
+        config={"container": "documents"},
+    )
+
+    def fail_to_build(_source):
+        raise ValueError("invalid Azure Blob configuration")
+
+    monkeypatch.setattr(service, "_build_connector", fail_to_build)
+
+    connection = service.test_connection(registered.source_id)
+    assert connection.status == "FAILED"
+    assert connection.error["code"] == "CONNECTION_FAILED"
+    assert "invalid Azure Blob configuration" in connection.error["message"]
+
+    ingestion = service.trigger_ingestion(registered.source_id)
+    assert ingestion.status == "FAILED"
+    assert ingestion.objects_failed == 1
+    assert "invalid Azure Blob configuration" in ingestion.error["message"]

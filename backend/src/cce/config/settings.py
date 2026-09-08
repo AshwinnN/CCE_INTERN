@@ -26,6 +26,7 @@ class Settings:
     agenticplane_timeout: int = 30
     agenticplane_max_retries: int = 3
     agenticplane_agent_id: str = "cce-ingestion"
+    agenticplane_graph_enabled: bool = True
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -115,4 +116,5 @@ def load_settings() -> Settings:
         agenticplane_agent_id=os.environ.get(
             "CCE_AGENTICPLANE_AGENT_ID", "cce-ingestion"
         ).strip(),
+        agenticplane_graph_enabled=_bool_env("CCE_AGENTICPLANE_GRAPH_ENABLED", True),
     )
