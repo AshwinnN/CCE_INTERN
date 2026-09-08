@@ -29,3 +29,4 @@ backups/*.dump
 
 # Application logs (console output persisted by cce.observability.logging).
 logs/
+node_modules
