@@ -44,6 +44,7 @@ src/cce/context_packages/validator.py
 src/cce/context_packages/versioning.py
 src/cce/context_packages/models/__init__.py
 src/cce/context_packages/models/ambiguity.py
+src/cce/context_packages/models/assets.py
 src/cce/context_packages/models/glossary.py
 src/cce/context_packages/models/package.py
 src/cce/context_packages/models/policy_rule.py
@@ -63,6 +64,8 @@ src/cce/gen/cce/__init__.py
 src/cce/gen/cce/v1/__init__.py
 src/cce/gen/cce/v1/common_pb2.py
 src/cce/gen/cce/v1/common_pb2_grpc.py
+src/cce/gen/cce/v1/domains_pb2.py
+src/cce/gen/cce/v1/domains_pb2_grpc.py
 src/cce/gen/cce/v1/governance_pb2.py
 src/cce/gen/cce/v1/governance_pb2_grpc.py
 src/cce/gen/cce/v1/health_pb2.py
@@ -71,6 +74,8 @@ src/cce/gen/cce/v1/packages_pb2.py
 src/cce/gen/cce/v1/packages_pb2_grpc.py
 src/cce/gen/cce/v1/query_pb2.py
 src/cce/gen/cce/v1/query_pb2_grpc.py
+src/cce/gen/cce/v1/retrieval_pb2.py
+src/cce/gen/cce/v1/retrieval_pb2_grpc.py
 src/cce/gen/cce/v1/sources_pb2.py
 src/cce/gen/cce/v1/sources_pb2_grpc.py
 src/cce/governance/__init__.py
@@ -83,9 +88,13 @@ src/cce/http/__init__.py
 src/cce/http/app.py
 src/cce/ingestion/__init__.py
 src/cce/ingestion/checkpoint.py
+src/cce/ingestion/grounding.py
+src/cce/ingestion/job_runner.py
+src/cce/ingestion/lifecycle_models.py
 src/cce/ingestion/models.py
 src/cce/ingestion/orchestrator.py
 src/cce/ingestion/service.py
+src/cce/ingestion/source_graph.py
 src/cce/ingestion/change_detection/__init__.py
 src/cce/ingestion/change_detection/documents.py
 src/cce/ingestion/change_detection/file_detection.py
@@ -112,7 +121,10 @@ src/cce/ingestion/unstructured/ingest.py
 src/cce/integrations/__init__.py
 src/cce/integrations/agentic_plane/__init__.py
 src/cce/integrations/agentic_plane/base.py
+src/cce/integrations/agentic_plane/bridge.py
+src/cce/integrations/agentic_plane/chunking.py
 src/cce/integrations/agentic_plane/client.py
+src/cce/integrations/agentic_plane/errors.py
 src/cce/integrations/agentic_plane/local_index.py
 src/cce/integrations/llm/__init__.py
 src/cce/integrations/llm/client.py
@@ -129,9 +141,18 @@ src/cce/persistence/__init__.py
 src/cce/persistence/ports.py
 src/cce/persistence/postgres/__init__.py
 src/cce/persistence/postgres/checkpoint_repository.py
+src/cce/persistence/postgres/context_repository.py
+src/cce/persistence/postgres/domain_repository.py
+src/cce/persistence/postgres/governance_repository.py
+src/cce/persistence/postgres/ingestion_repository.py
+src/cce/persistence/postgres/job_repository.py
+src/cce/persistence/postgres/lifecycle_db.py
 src/cce/persistence/postgres/metadata_repository.py
 src/cce/persistence/postgres/migrations.py
+src/cce/persistence/postgres/runtime_repository.py
 src/cce/persistence/postgres/source_repository.py
+src/cce/retrieval/__init__.py
+src/cce/retrieval/service.py
 src/cce/rpc/__init__.py
 src/cce/rpc/server.py
 src/cce/rpc/interceptors/__init__.py
@@ -140,10 +161,13 @@ src/cce/rpc/interceptors/authorization.py
 src/cce/rpc/interceptors/correlation.py
 src/cce/rpc/interceptors/logging.py
 src/cce/rpc/services/__init__.py
+src/cce/rpc/services/domain_service.py
+src/cce/rpc/services/errors.py
 src/cce/rpc/services/governance_service.py
 src/cce/rpc/services/health_service.py
 src/cce/rpc/services/package_service.py
 src/cce/rpc/services/query_service.py
+src/cce/rpc/services/retrieval_service.py
 src/cce/rpc/services/source_service.py
 src/cce/runtime/__init__.py
 src/cce/runtime/ambiguity.py
@@ -151,6 +175,7 @@ src/cce/runtime/context_assembler.py
 src/cce/runtime/entity_resolution.py
 src/cce/runtime/intent.py
 src/cce/runtime/live_data.py
+src/cce/runtime/models.py
 src/cce/runtime/orchestrator.py
 src/cce/runtime/package_resolver.py
 src/cce/runtime/proof.py
@@ -161,6 +186,7 @@ src/cce/runtime/service.py
 src/cce/runtime/sql_executor.py
 src/cce/runtime/sql_generator.py
 src/cce/runtime/sql_guard.py
+src/cce/runtime/sql_pipeline.py
 src/cce/runtime/state.py
 src/cce/security/__init__.py
 src/cce/security/credentials.py
@@ -170,6 +196,7 @@ src/cce/security/roles.py
 src/cce/skills/__init__.py
 src/cce/skills/loader.py
 src/cce/sources/__init__.py
+src/cce/sources/models.py
 src/cce/sources/service.py
 src/cce/traceability/__init__.py
 src/cce/traceability/models.py

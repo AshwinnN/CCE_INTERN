@@ -1,0 +1,1 @@
+export function Feedback({ message, type='error', onClose }: { message:string; type?:'error'|'success'; onClose?:()=>void }) { return <div className={`feedback feedback-${type}`} role="alert"><span>{message}</span>{onClose && <button className="feedback-close" onClick={onClose}>×</button>}</div> }
