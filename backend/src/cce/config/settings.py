@@ -44,7 +44,7 @@ class Settings:
     job_lease_seconds: int = 120
     job_poll_seconds: int = 2
     llm_provider: str = "gemini"
-    llm_model: str = "gemini-2.5-flash"
+    llm_model: str = "gemini-3.1-flash-lite"
     llm_domain_model: str = ""
     llm_extraction_model: str = ""
     llm_sql_model: str = ""
@@ -169,7 +169,7 @@ def load_settings() -> Settings:
         job_lease_seconds=int(os.environ.get("CCE_JOB_LEASE_SECONDS", "120")),
         job_poll_seconds=int(os.environ.get("CCE_JOB_POLL_SECONDS", "2")),
         llm_provider=str(os.environ.get("CCE_LLM_PROVIDER", "gemini")),
-        llm_model=str(os.environ.get("CCE_LLM_MODEL", "gemini-2.5-flash")),
+        llm_model=str(os.environ.get("CCE_LLM_MODEL", "gemini-3.1-flash-lite")),
         llm_domain_model=str(os.environ.get("CCE_LLM_DOMAIN_MODEL", "")),
         llm_extraction_model=str(os.environ.get("CCE_LLM_EXTRACTION_MODEL", "")),
         llm_sql_model=str(os.environ.get("CCE_LLM_SQL_MODEL", "")),

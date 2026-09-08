@@ -13,8 +13,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-DEFAULT_MODEL = "gemini-2.5-flash"
-
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
 def complete(prompt: str, *, response_format: str = "text") -> str:
     provider = os.environ.get("CCE_LLM_PROVIDER", "gemini").strip().lower()
