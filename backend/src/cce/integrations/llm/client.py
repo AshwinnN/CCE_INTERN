@@ -15,6 +15,46 @@ from typing import Any
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 
+_VALID_ASSET_TYPES = {
+    "GLOSSARY",
+    "POLICY_RULE",
+    "SEMANTIC_MAPPING",
+    "ENTITY",
+    "RELATIONSHIP",
+    "VERIFIED_SQL",
+    "AMBIGUITY",
+}
+# Models occasionally invent a tag for "this is a table/column schema" instead of
+# using the one that actually exists for that shape. Normalize known variants
+# rather than failing the whole extraction over a mislabeled discriminator.
+_ASSET_TYPE_ALIASES = {
+    "table": "SEMANTIC_MAPPING",
+    "table_asset": "SEMANTIC_MAPPING",
+    "tableasset": "SEMANTIC_MAPPING",
+    "table_schema": "SEMANTIC_MAPPING",
+    "tableschema": "SEMANTIC_MAPPING",
+    "data_table": "SEMANTIC_MAPPING",
+    "datatable": "SEMANTIC_MAPPING",
+    "data_asset": "SEMANTIC_MAPPING",
+    "dataasset": "SEMANTIC_MAPPING",
+    "schema": "SEMANTIC_MAPPING",
+    "column_mapping": "SEMANTIC_MAPPING",
+}
+
+
+def _normalize_asset_types(args: dict) -> dict:
+    for candidate in args.get("candidates") or []:
+        payload = candidate.get("payload") if isinstance(candidate, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        tag = payload.get("asset_type")
+        if isinstance(tag, str) and tag.upper() not in _VALID_ASSET_TYPES:
+            mapped = _ASSET_TYPE_ALIASES.get(tag.strip().lower().replace(" ", "_"))
+            if mapped:
+                payload["asset_type"] = mapped
+    return args
+
+
 def complete(prompt: str, *, response_format: str = "text") -> str:
     provider = os.environ.get("CCE_LLM_PROVIDER", "gemini").strip().lower()
     message = (
@@ -110,7 +150,9 @@ class StructuredLLM:
             )
         else:
             raise ValueError("Unsupported LLM provider")
-        result = model.with_structured_output(output_type).invoke(
+        result = model.with_structured_output(
+            output_type, method="function_calling", include_raw=True
+        ).invoke(
             [
                 (
                     "system",
@@ -120,4 +162,12 @@ class StructuredLLM:
                 ("human", request.model_dump_json()),
             ]
         )
-        return output_type.model_validate(result)
+        if result["parsed"] is not None:
+            return output_type.model_validate(result["parsed"])
+
+        tool_calls = getattr(result["raw"], "tool_calls", None) or []
+        if not tool_calls:
+            raise result["parsing_error"] or RuntimeError(
+                "LLM returned no structured result"
+            )
+        return output_type.model_validate(_normalize_asset_types(tool_calls[0]["args"]))
