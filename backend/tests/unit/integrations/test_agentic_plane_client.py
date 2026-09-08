@@ -27,9 +27,7 @@ class FakeGraph:
     def __init__(self, *, fail_for=()):
         self.extractions = []
         self.search_calls = []
-        self.search_result = SimpleNamespace(
-            entities=[], relationships=[], memories=[]
-        )
+        self.search_result = SimpleNamespace(entities=[], relationships=[], memories=[])
         self._fail_for = set(fail_for)
 
     def extract_and_store(self, *, content, agent_id, memory_id):
@@ -145,7 +143,9 @@ def test_index_maps_raw_chunks_and_provenance_and_persists_ids():
         "raw cell text",
     ]
     assert all("embedding" not in item for item in plane.memory.stored_items)
-    assert all(item["memory_type"].value == "semantic" for item in plane.memory.stored_items)
+    assert all(
+        item["memory_type"].value == "semantic" for item in plane.memory.stored_items
+    )
     assert all(item["extract_entities"] is False for item in plane.memory.stored_items)
     assert all(item["tags"] == ["ingested"] for item in plane.memory.stored_items)
 
@@ -289,9 +289,7 @@ def test_graph_maps_sdk_result_without_synthesis():
 
     result = client.graph("Who worked on it?", depth=3, limit=4)
 
-    assert plane.graph.search_calls == [
-        ("Who worked on it?", "cce-ingestion", 3, 4)
-    ]
+    assert plane.graph.search_calls == [("Who worked on it?", "cce-ingestion", 3, 4)]
     assert result == {
         "entities": [
             {
@@ -363,3 +361,31 @@ def test_index_graph_extraction_failure_is_non_fatal_per_chunk():
     }
     assert [call[0] for call in plane.graph.extractions] == ["bad chunk", "good chunk"]
     assert bridge.saved[0]["memory_ids"] == ["memory-0", "memory-1"]
+
+
+def test_metadata_filter_uses_installed_sdk_search_contract():
+    """Exercise SDK request construction without hosted network calls."""
+    from agenticplane.gen.agenticplane.v1.memory_pb2 import SearchLongTermResponse
+    from agenticplane.resources.memory import MemoryResource
+    from google.protobuf.json_format import MessageToDict
+
+    captured = []
+    resource = MemoryResource.__new__(MemoryResource)
+
+    def search(request):
+        captured.append(request)
+        return SearchLongTermResponse()
+
+    resource._stub = SimpleNamespace(search_long_term=search)
+    plane = SimpleNamespace(memory=resource)
+    client = AgenticPlaneClient(
+        base_url="https://example.invalid",
+        api_key="test",
+        dsn="unused",
+        plane_factory=lambda **kwargs: plane,
+        bridge_repository=FakeBridge(),
+    )
+    scope = {"domain_id": "domain", "source_id": {"$in": ["source-a", "source-b"]}}
+    assert client.search("question", limit=30, metadata_filter=scope) == []
+    assert MessageToDict(captured[0].metadata_filter) == scope
+    assert captured[0].limit == 30

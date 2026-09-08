@@ -1,0 +1,12 @@
+syntax = "proto3";
+package cce.v1;
+import "cce/v1/common.proto";
+import "google/protobuf/struct.proto";
+service DomainService {
+ rpc CreateDomain(CreateDomainRequest) returns (Domain);
+ rpc ListDomains(ListDomainsRequest) returns (ListDomainsResponse);
+}
+message CreateDomainRequest { string name=1; string description=2; repeated string tags=3; google.protobuf.Struct metadata=4; Actor actor=5; }
+message Domain { string domain_id=1; string name=2; string description=3; repeated string tags=4; google.protobuf.Struct metadata=5; bool enabled=6; bool has_active_package=7; }
+message ListDomainsRequest { Actor actor=1; }
+message ListDomainsResponse { repeated Domain domains=1; }

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import uuid
-import hashlib
 from typing import Callable
 
 import psycopg2
@@ -12,7 +12,6 @@ import psycopg2.extras
 
 from cce.integrations.agentic_plane.chunking import payload_chunks as _payload_chunks
 from cce.integrations.agentic_plane.errors import GraphNotSupportedError
-
 
 DEFAULT_EMBEDDING_MODEL = "models/text-embedding-004"
 
@@ -57,13 +56,30 @@ class LocalIndexClient:
                             payload.get("revision") or "",
                             payload.get("object_id") or payload["document_id"],
                             payload.get("trace_id") or "",
-                            psycopg2.extras.Json(chunk.get("metadata", {})),
+                            psycopg2.extras.Json(
+                                {
+                                    **payload.get("metadata", {}),
+                                    **chunk.get("metadata", {}),
+                                }
+                            ),
                         ),
                     )
                 conn.commit()
         return {"status": "indexed", "indexed": len(chunks)}
 
-    def search(self, query: str, *, limit: int = 5) -> list[dict]:
+    def search(
+        self, query: str, *, limit: int = 5, metadata_filter: dict | None = None
+    ) -> list[dict]:
+        filters = dict(metadata_filter or {})
+        source_scope = filters.get("source_id")
+        source_ids = None
+        if isinstance(source_scope, dict):
+            if set(source_scope) != {"$in"}:
+                raise ValueError(
+                    "Local index supports only source_id $in and metadata equality"
+                )
+            source_ids = source_scope["$in"]
+            filters.pop("source_id")
         embedding = self._embed([query])[0]
         with psycopg2.connect(self._dsn) as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -77,10 +93,19 @@ class LocalIndexClient:
                            source_ref, version, object_id, trace_id, metadata,
                            embedding <=> %s::vector AS distance
                     FROM cce_local_index_chunk
+                    WHERE metadata @> %s::jsonb
+                      AND (%s::text[] IS NULL OR source_id::text = ANY(%s::text[]))
                     ORDER BY embedding <=> %s::vector
                     LIMIT %s
                     """,
-                    (_vector_literal(embedding), _vector_literal(embedding), limit),
+                    (
+                        _vector_literal(embedding),
+                        psycopg2.extras.Json(filters),
+                        source_ids,
+                        source_ids,
+                        _vector_literal(embedding),
+                        limit,
+                    ),
                 )
                 rows = cur.fetchall()
         # Boundary convention: score is cosine similarity, so higher is better.
@@ -148,7 +173,9 @@ def _source_uuid(source_id: str) -> str:
         uuid.UUID(str(source_id))
         return str(source_id)
     except ValueError:
-        return str(uuid.uuid5(uuid.UUID("6f1b1a2e-6c1a-4b8e-9f2a-9e3b7c2d5a10"), source_id))
+        return str(
+            uuid.uuid5(uuid.UUID("6f1b1a2e-6c1a-4b8e-9f2a-9e3b7c2d5a10"), source_id)
+        )
 
 
 def _vector_literal(values: list[float]) -> str:

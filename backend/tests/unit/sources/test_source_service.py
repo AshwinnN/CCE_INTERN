@@ -1,5 +1,3 @@
-import time
-
 from cce.sources.service import SourceService
 
 
@@ -26,7 +24,9 @@ class InMemoryRepo:
         return self.sources.get(source_id)
 
     def list_sources(self):
-        unique_sources = {source["source_id"]: source for source in self.sources.values()}
+        unique_sources = {
+            source["source_id"]: source for source in self.sources.values()
+        }
         return list(unique_sources.values())
 
     def create_ingestion_run(self, source_id, trace_id=None):
@@ -41,7 +41,9 @@ class InMemoryRepo:
         }
         return "run-1"
 
-    def update_ingestion_run(self, run_id, status, objects_processed=0, objects_failed=0, error_message=None):
+    def update_ingestion_run(
+        self, run_id, status, objects_processed=0, objects_failed=0, error_message=None
+    ):
         self.runs[run_id].update(
             {
                 "status": status,
@@ -146,10 +148,10 @@ def test_connector_build_failure_is_returned_and_persisted(monkeypatch):
 
     connection = service.test_connection(registered.source_id)
     assert connection.status == "FAILED"
-    assert connection.error["code"] == "CONNECTION_FAILED"
-    assert "invalid Azure Blob configuration" in connection.error["message"]
+    assert connection.error.code == "CONNECTION_FAILED"
+    assert "invalid Azure Blob configuration" in connection.error.message
 
     ingestion = service.trigger_ingestion(registered.source_id)
     assert ingestion.status == "FAILED"
     assert ingestion.objects_failed == 1
-    assert "invalid Azure Blob configuration" in ingestion.error["message"]
+    assert "invalid Azure Blob configuration" in ingestion.error.message

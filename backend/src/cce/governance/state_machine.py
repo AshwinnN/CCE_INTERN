@@ -1,11 +1,6 @@
-"""Governance transition rules."""
+"""A resolved proposal is immutable. Corrections are new proposals."""
 
-VALID_TRANSITIONS = {
-    "proposed": {"review", "rejected"},
-    "review": {"approved", "rejected"},
-    "approved": {"proposed"},
-    "rejected": {"proposed"},
-}
+VALID_TRANSITIONS = {"PROPOSED": {"APPROVED", "REJECTED"}}
 
 
 def can_transition(current: str, target: str) -> bool:

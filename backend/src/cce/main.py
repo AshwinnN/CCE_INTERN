@@ -33,6 +33,7 @@ def main() -> None:
     settings = load_settings()
     app = build_application(settings)
     try:
+        app.job_runner.start()
         if settings.http_enabled:
             Thread(target=_serve_http, args=(app,), daemon=True).start()
         serve(app)

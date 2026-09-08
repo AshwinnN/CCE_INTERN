@@ -1,66 +1,39 @@
-# CCE Tool
+# CoStrategix Context Engine
 
-CCE (CoStrategix Context Engine) is a governed context server. The backend
-owns source registration, ingestion orchestration, governance, context
-packages, guarded query runtime boundaries, traceability, and MCP exposure.
+CCE ingests source evidence, stages machine proposals, requires human review, builds immutable domain packages and answers through parallel Context ON/OFF branches. PostgreSQL owns governed state. AgenticPlane supplies candidate vector evidence; only active package assets govern Context ON.
 
 ## Layout
 
-```text
-backend/                  Python gRPC/MCP backend
-backend/proto/            Protobuf-first service contracts
-backend/src/cce/          CCE application package
-backend/skills/           Versioned skill assets
-backend/migrations/       cce_control PostgreSQL migrations
-backend/tests/            Unit, integration, contract, and e2e tests
-frontend/                 Placeholder for future UI
-scripts/                  Local generation, migration, and diagnostic scripts
-deploy/docker/            Backend container image
-docs/                     Architecture, ADRs, and source references
+- `backend/src/cce/`: real services, source/query/SQL LangGraphs, PostgreSQL repositories and transport adapters.
+- `backend/proto/`: gRPC contracts; regenerate with `python scripts/generate_proto.py`.
+- `backend/migrations/cce_control/`: forward migrations, including `012_domain_governance_lifecycle.sql` and `013_runtime_and_jobs.sql`.
+- `backend/tests/`: unit, lifecycle integration and explicitly enabled live tests.
+- `frontend/` and `backend/api/`: development UI and mock API, separate from the production backend.
+
+## Development
+
+Install from `backend/` with `pip install -e '.[dev]'`. AgenticPlane >=1.3 requires the organization's private Python registry; supply authentication outside the repository. Copy `.env.example` and configure PostgreSQL, index and model providers. Do not commit credentials.
+
+From `backend/`, run `python -m cce.main`. Startup applies migrations, starts the durable ingestion job worker, and serves gRPC (50051) plus HTTP (8080 by default). PostgreSQL is required. Local vector indexing additionally requires pgvector; AgenticPlane mode does not.
+
+Create domains through `POST /domains` with an ADMIN actor. Register/test sources, then explicitly trigger `/sources/{source_id}/ingest` and poll `/ingestion-runs/{run_id}`. Review/edit all proposals and approve/reject them with a STEWARD actor. The last decision automatically builds the domain package. Query with `POST /query` and an optional `domain_id`.
+
+Deploy the adapters behind authenticated infrastructure that supplies trustworthy actor claims. The application role fields alone are not authentication. `/retrieve` is raw infrastructure diagnostics, not a governed query endpoint.
+
+## Tests
+
+Run non-live unit tests from `backend/`:
+
+```sh
+PYTHON_DOTENV_DISABLED=1 python -m pytest tests/unit
 ```
 
-## Local Commands
+Lifecycle tests create/drop uniquely named databases on a disposable PostgreSQL server. The configured test user needs CREATE DATABASE permission; application databases are not truncated.
 
-Install the backend in editable mode from `backend/`:
-
-```powershell
-pip install -e .[dev]
+```sh
+PYTHON_DOTENV_DISABLED=1 CCE_TEST_DATABASE_URL='postgresql://test_user:test_password@localhost/postgres' python -m pytest tests/integration/lifecycle
 ```
 
-Run tests from `backend/`:
+Live Azure/Snowflake tests require explicit live-test flags and credentials. Fixture tests do not establish hosted accuracy/lift.
 
-```powershell
-python -m pytest
-```
-
-Generate protobuf code:
-
-```powershell
-python ..\scripts\generate_proto.py
-```
-
-Start the gRPC backend:
-
-```powershell
-python -m cce.main
-```
-
-Local PostgreSQL uses the `cce_control` database. To start the server and
-database together, run:
-
-```powershell
-docker compose up --build
-```
-
-Smoke-check the gRPC health endpoint:
-
-```powershell
-docker compose exec backend python /app/scripts/smoke_server.py --target localhost:50051
-```
-
-## Architecture
-
-The target repository structure is tracked at
-`docs/architecture/structure.md`. AgenticPlane remains behind
-`backend/src/cce/integrations/agentic_plane/`; CCE does not own graph,
-vector, embedding, chunking, or retrieval infrastructure.
+See [implementation status](docs/IMPLEMENTATION_STATUS.md), [implementation report](docs/IMPLEMENTATION_REPORT.md), and the [architecture](docs/architecture/structure.md).

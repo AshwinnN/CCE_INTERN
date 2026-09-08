@@ -1,45 +1,54 @@
-"""Package RPC mapping."""
+from cce.rpc.services.errors import rpc_errors
+from google.protobuf.json_format import ParseDict
+
+
+def encode(snapshot):
+    from cce.gen.cce.v1 import packages_pb2
+
+    if snapshot is None:
+        return packages_pb2.PackageVersion(status="NO_ACTIVE_PACKAGE")
+    return ParseDict(
+        {
+            "package_id": str(snapshot.package_id),
+            "version": str(snapshot.version),
+            "status": snapshot.status,
+            "assets": [str(a.asset_revision_id) for a in snapshot.assets],
+            "snapshot": snapshot.model_dump(mode="json"),
+        },
+        packages_pb2.PackageVersion(),
+    )
 
 
 class PackageRPCService:
     def __init__(self, app):
         self.app = app
 
+    @rpc_errors
     def GetPackage(self, request, context):
         from cce.gen.cce.v1 import packages_pb2
 
-        package = self.app.package_service.get_package(request.package_id)
-        return packages_pb2.Package(
-            package_id=package["package_id"],
-            name=package["name"],
-            active_version=package["active_version"],
+        return ParseDict(
+            self.app.package_service.get_package(request.package_id),
+            packages_pb2.Package(),
         )
 
+    @rpc_errors
     def ListPackages(self, request, context):
         from cce.gen.cce.v1 import packages_pb2
 
-        packages = [
-            packages_pb2.Package(
-                package_id=item.get("package_id", ""),
-                name=item.get("name", ""),
-                active_version=item.get("active_version", ""),
-            )
-            for item in self.app.package_service.list_packages()
-        ]
-        return packages_pb2.ListPackagesResponse(packages=packages)
+        return ParseDict(
+            {"packages": self.app.package_service.list_packages()},
+            packages_pb2.ListPackagesResponse(),
+        )
 
+    @rpc_errors
     def GetPackageVersion(self, request, context):
-        from cce.gen.cce.v1 import packages_pb2
+        return encode(
+            self.app.package_service.get_package_version(
+                request.package_id, request.version
+            )
+        )
 
-        version = self.app.package_service.get_package_version(
-            request.package_id, request.version
-        )
-        return packages_pb2.PackageVersion(
-            package_id=version["package_id"],
-            version=version["version"],
-            status=version["status"],
-            assets=version.get("assets", []),
-            scope=version.get("scope", ""),
-            created_at=version.get("created_at", ""),
-            parent_version=version.get("parent_version", ""),
-        )
+    @rpc_errors
+    def GetActivePackage(self, request, context):
+        return encode(self.app.package_service.active(request.domain_id))

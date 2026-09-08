@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from agenticplane import AgenticPlane
@@ -11,7 +11,6 @@ from agenticplane.types import MemoryType
 
 from cce.integrations.agentic_plane.bridge import AgenticPlaneMemoryBridge
 from cce.integrations.agentic_plane.chunking import payload_chunks
-
 
 logger = logging.getLogger(__name__)
 
@@ -60,21 +59,30 @@ class AgenticPlaneClient:
     def index(self, payload: dict) -> dict:
         document_id = payload["document_id"]
         if payload.get("change_type") == "deleted":
-            logger.info("AgenticPlane index: document_id=%s change_type=deleted -> delete()", document_id)
+            logger.info(
+                "AgenticPlane index: document_id=%s change_type=deleted -> delete()",
+                document_id,
+            )
             return self.delete(document_id)
 
         source_id = payload["source_id"]
         chunks = list(payload_chunks(payload))
         logger.info(
             "AgenticPlane index: document_id=%s source_id=%s agent_id=%s chunked into %d chunks",
-            document_id, source_id, self._agent_id, len(chunks),
+            document_id,
+            source_id,
+            self._agent_id,
+            len(chunks),
         )
 
         # AgenticPlane has no document-level replacement operation. Clear the
         # previous memory IDs recorded by CCE before storing the new revision.
         self.delete(document_id)
         if not chunks:
-            logger.info("AgenticPlane index: document_id=%s has no chunks, nothing to send", document_id)
+            logger.info(
+                "AgenticPlane index: document_id=%s has no chunks, nothing to send",
+                document_id,
+            )
             return {
                 "status": "indexed",
                 "indexed": 0,
@@ -95,7 +103,11 @@ class AgenticPlaneClient:
                 "agent_id": self._agent_id,
                 "content": chunk["chunk_text"],
                 "memory_type": MemoryType.SEMANTIC,
-                "metadata": {**provenance, **chunk.get("metadata", {})},
+                "metadata": {
+                    **provenance,
+                    **payload.get("metadata", {}),
+                    **chunk.get("metadata", {}),
+                },
                 "tags": ["ingested"],
                 "extract_entities": False,
             }
@@ -104,21 +116,31 @@ class AgenticPlaneClient:
         logger.info(
             "AgenticPlane index: document_id=%s sending %d chunks to memory.store_batch "
             "(vector store), agent_id=%s",
-            document_id, len(items), self._agent_id,
+            document_id,
+            len(items),
+            self._agent_id,
         )
-        memory_ids = [str(memory_id) for memory_id in self._plane.memory.store_batch(items)]
+        memory_ids = [
+            str(memory_id) for memory_id in self._plane.memory.store_batch(items)
+        ]
         if len(memory_ids) != len(items):
             logger.error(
                 "AgenticPlane index: document_id=%s store_batch returned %d memory IDs for %d chunks",
-                document_id, len(memory_ids), len(items),
+                document_id,
+                len(memory_ids),
+                len(items),
             )
             self._delete_new_memories(memory_ids)
             raise RuntimeError(
                 "AgenticPlane store_batch returned %d memory IDs for %d chunks"
                 % (len(memory_ids), len(items))
             )
-        logger.info("AgenticPlane index: document_id=%s stored %d chunks in vector store, memory_ids=%s",
-                    document_id, len(memory_ids), memory_ids)
+        logger.info(
+            "AgenticPlane index: document_id=%s stored %d chunks in vector store, memory_ids=%s",
+            document_id,
+            len(memory_ids),
+            memory_ids,
+        )
 
         try:
             self._bridge.save_document(
@@ -135,8 +157,11 @@ class AgenticPlaneClient:
         entity_count = 0
         relationship_count = 0
         if self._graph_enabled:
-            logger.info("AgenticPlane index: document_id=%s sending %d chunks to graph.extract_and_store",
-                        document_id, len(items))
+            logger.info(
+                "AgenticPlane index: document_id=%s sending %d chunks to graph.extract_and_store",
+                document_id,
+                len(items),
+            )
             for item, memory_id in zip(items, memory_ids):
                 try:
                     extraction = self._plane.graph.extract_and_store(
@@ -162,7 +187,10 @@ class AgenticPlaneClient:
         logger.info(
             "AgenticPlane index: document_id=%s complete: indexed=%d entities_extracted=%d "
             "relationships_extracted=%d",
-            document_id, len(memory_ids), entity_count, relationship_count,
+            document_id,
+            len(memory_ids),
+            entity_count,
+            relationship_count,
         )
         return {
             "status": "indexed",
@@ -171,9 +199,20 @@ class AgenticPlaneClient:
             "relationships_extracted": relationship_count,
         }
 
-    def search(self, query: str, *, limit: int = 5) -> list[dict]:
-        logger.info("AgenticPlane search: agent_id=%s limit=%d query=%r", self._agent_id, limit, query)
-        result = self._plane.memory.search(self._agent_id, query, limit=limit)
+    def search(
+        self, query: str, *, limit: int = 5, metadata_filter: dict | None = None
+    ) -> list[dict]:
+        logger.info(
+            "AgenticPlane search: agent_id=%s limit=%d query=%r",
+            self._agent_id,
+            limit,
+            query,
+        )
+        # Verified against AgenticPlane 1.3 MemoryResource.search and SearchOptions.
+        kwargs = {"limit": limit}
+        if metadata_filter:
+            kwargs["metadata_filter"] = metadata_filter
+        result = self._plane.memory.search(self._agent_id, query, **kwargs)
         hits = [self._search_hit(record) for record in result.results]
         logger.info("AgenticPlane search: returned %d hits", len(hits))
         # Boundary convention: score is cosine similarity, so higher is better.
@@ -182,8 +221,11 @@ class AgenticPlaneClient:
     def delete(self, document_id: str) -> dict:
         references = self._bridge.list_document(document_id)
         if references:
-            logger.info("AgenticPlane delete: document_id=%s removing %d memory references",
-                        document_id, len(references))
+            logger.info(
+                "AgenticPlane delete: document_id=%s removing %d memory references",
+                document_id,
+                len(references),
+            )
         for reference in references:
             self._plane.memory.delete(
                 reference["memory_id"],
@@ -201,8 +243,13 @@ class AgenticPlaneClient:
         depth: int = 2,
         limit: int = 10,
     ) -> dict:
-        logger.info("AgenticPlane graph query: agent_id=%s depth=%d limit=%d query=%r",
-                    agent_id or self._agent_id, depth, limit, query)
+        logger.info(
+            "AgenticPlane graph query: agent_id=%s depth=%d limit=%d query=%r",
+            agent_id or self._agent_id,
+            depth,
+            limit,
+            query,
+        )
         result = self._plane.graph.graphrag_search(
             query,
             agent_id=agent_id or self._agent_id,
@@ -211,13 +258,13 @@ class AgenticPlaneClient:
         )
         logger.info(
             "AgenticPlane graph query: returned %d entities, %d relationships, %d memories",
-            len(result.entities), len(result.relationships), len(result.memories),
+            len(result.entities),
+            len(result.relationships),
+            len(result.memories),
         )
         return {
             "entities": [_plain_sdk_model(item) for item in result.entities],
-            "relationships": [
-                _plain_sdk_model(item) for item in result.relationships
-            ],
+            "relationships": [_plain_sdk_model(item) for item in result.relationships],
             "memories": [_plain_sdk_model(item) for item in result.memories],
         }
 
@@ -272,8 +319,4 @@ def _plain_sdk_model(value: Any) -> dict:
     model_dump = getattr(value, "model_dump", None)
     if model_dump is not None:
         return dict(model_dump(mode="json"))
-    return {
-        key: item
-        for key, item in vars(value).items()
-        if not key.startswith("_")
-    }
+    return {key: item for key, item in vars(value).items() if not key.startswith("_")}

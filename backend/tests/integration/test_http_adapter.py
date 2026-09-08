@@ -1,9 +1,13 @@
 from types import SimpleNamespace
-
-from fastapi.testclient import TestClient
+from uuid import uuid4
 
 from cce.http.app import create_app
-from cce.runtime.service import QueryResponse
+from cce.runtime.models import DomainResolution, QueryBranchResult, QueryResponse
+from cce.sources.models import IngestionRunResult, SourceOperationResult
+from fastapi.testclient import TestClient
+
+TRACE_ID = str(uuid4())
+RUN_ID = str(uuid4())
 
 
 def test_http_adapter_health_sources_and_query():
@@ -23,22 +27,24 @@ def test_http_adapter_health_sources_and_query():
                     "updated_at": None,
                 }
             ],
-            register_source=lambda adapter, source_id, credential_ref, kind, config: SimpleNamespace(
-                source_id="source-123", status="REGISTERED", error=None
+            register_source=lambda adapter, source_id, credential_ref, kind, config: (
+                SourceOperationResult(
+                    source_id="source-123", status="REGISTERED", error=None
+                )
             ),
-            test_connection=lambda source_id: SimpleNamespace(
+            test_connection=lambda source_id: SourceOperationResult(
                 source_id=source_id, status="CONNECTED", error=None
             ),
-            trigger_ingestion=lambda source_id: SimpleNamespace(
-                ingestion_run_id="run-1",
+            trigger_ingestion=lambda source_id: IngestionRunResult(
+                ingestion_run_id=RUN_ID,
                 status="RUNNING",
                 error=None,
                 objects_processed=0,
                 objects_failed=0,
             ),
-            get_ingestion_status=lambda run_id: SimpleNamespace(
+            get_ingestion_status=lambda run_id: IngestionRunResult(
                 ingestion_run_id=run_id,
-                status="SUCCESS",
+                status="COMPLETE",
                 error=None,
                 objects_processed=1,
                 objects_failed=0,
@@ -46,9 +52,11 @@ def test_http_adapter_health_sources_and_query():
         ),
         query_service=SimpleNamespace(
             query=lambda request: QueryResponse(
-                answer="ok",
-                trace_id="trace-1",
-                context_used=True,
+                trace_id=TRACE_ID,
+                question=request.question,
+                domain=DomainResolution(),
+                context_on=QueryBranchResult(status="SUCCESS", answer="ok"),
+                context_off=QueryBranchResult(status="SKIPPED"),
             )
         ),
         retrieval_service=SimpleNamespace(
@@ -94,30 +102,22 @@ def test_http_adapter_health_sources_and_query():
         "status": "CONNECTED",
     }
     assert client.post("/sources/source-123/ingest", json={}).json() == {
-        "ingestion_run_id": "run-1",
+        "ingestion_run_id": RUN_ID,
         "status": "RUNNING",
         "objects_processed": 0,
         "objects_failed": 0,
     }
-    assert client.get("/ingestion-runs/run-1").json() == {
-        "ingestion_run_id": "run-1",
-        "status": "SUCCESS",
+    assert client.get(f"/ingestion-runs/{RUN_ID}").json() == {
+        "ingestion_run_id": RUN_ID,
+        "status": "COMPLETE",
         "objects_processed": 1,
         "objects_failed": 0,
     }
-    assert client.post("/query", json={"question": "hello"}).json() == {
-        "answer": "ok",
-        "trace_id": "trace-1",
-        "citations": [],
-        "context_used": True,
-        "applied_rule": "",
-        "package_id": "",
-        "package_version": "",
-        "executed_sql": "",
-        "approver": "",
-        "valid_until": "",
-        "confidence": 0.0,
-    }
+    response = client.post("/query", json={"question": "hello"})
+    assert response.status_code == 200
+    assert response.json()["context_on"]["answer"] == "ok"
+    assert response.json()["trace_id"] == TRACE_ID
+    assert response.json()["context_off"]["status"] == "SKIPPED"
     assert client.post(
         "/retrieve",
         json={"question": "Who worked on CCE?", "limit": 7, "graph_depth": 3},

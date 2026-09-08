@@ -26,6 +26,7 @@ agents/connector_agent/agent.py -- that Agent's documented contract is
 thin, separate orchestrator that chains ConnectorAgent.handle() into
 run_ingestion() per event, so this boundary stays intact.
 """
+
 import copy
 import hashlib
 import json
@@ -36,33 +37,39 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, TypedDict
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 
-from cce.ingestion.checkpoint import IngestionCheckpointStore, get_ingestion_checkpoint_store
-from cce.security.dlp import classify_text, get_dlp_confidence_threshold, redact_text
-from cce.ingestion.normalizers.document import normalize_to_canonical
+from cce.connectors.base.canonical_types import canonicalize_type
 from cce.connectors.fetch import fetch_structured as _fetch_structured_card
 from cce.connectors.fetch import fetch_unstructured as _fetch_unstructured_bytes
-from cce.connectors.base.canonical_types import canonicalize_type
+from cce.ingestion.checkpoint import (
+    IngestionCheckpointStore,
+    get_ingestion_checkpoint_store,
+)
+from cce.ingestion.normalizers.document import normalize_to_canonical
 from cce.persistence.ports import MetadataRepository, SchemaSnapshot
+from cce.security.dlp import classify_text, get_dlp_confidence_threshold, redact_text
 
 logger = logging.getLogger(__name__)
 
 
 # ===== STATE SHAPE =====
 
+
 class IngestionState(TypedDict, total=False):
     # --- input, set once by run_ingestion() ---
     source_id: str
     tenant_id: Optional[str]
-    kind: str                      # "structured" | "unstructured" -- from event["source"]["kind"]
-    adapter: str                   # from event["source"]["adapter"]
+    kind: str  # "structured" | "unstructured" -- from event["source"]["kind"]
+    adapter: str  # from event["source"]["adapter"]
     connection_handle: dict
-    event: dict                    # full SourceChangeEvent-shaped dict
+    event: dict  # full SourceChangeEvent-shaped dict
     schema_scope: List[str]
-    schema_database: Optional[str]  # structured lane only -- adapter's database/catalog name
-                                     # (not present in SourceChangeEvent; see
-                                     # persist_structured_metadata_node's _resolve_schema_database())
+    schema_database: Optional[
+        str
+    ]  # structured lane only -- adapter's database/catalog name
+    # (not present in SourceChangeEvent; see
+    # persist_structured_metadata_node's _resolve_schema_database())
     trace_id: str
 
     # injected dependencies (test/caller-supplied; production defaults are
@@ -76,10 +83,12 @@ class IngestionState(TypedDict, total=False):
     _metadata_repository: Optional[MetadataRepository]
 
     # --- intermediate ---
-    raw_content: Optional[Any]         # bytes (unstructured) | dict schema card (structured)
-    parsed_doc: Optional[dict]         # CanonicalDocument-shaped, unstructured only
-    normalized_doc: Optional[dict]     # CanonicalDocument-shaped, both lanes
-    metadata_snapshot_id: Optional[str]  # structured lane only -- set by persist_structured_metadata_node
+    raw_content: Optional[Any]  # bytes (unstructured) | dict schema card (structured)
+    parsed_doc: Optional[dict]  # CanonicalDocument-shaped, unstructured only
+    normalized_doc: Optional[dict]  # CanonicalDocument-shaped, both lanes
+    metadata_snapshot_id: Optional[
+        str
+    ]  # structured lane only -- set by persist_structured_metadata_node
 
     dlp_verdict: Optional[dict]
     redacted_doc: Optional[dict]
@@ -96,6 +105,7 @@ class IngestionState(TypedDict, total=False):
 
 
 # ===== WORKFLOW NODES =====
+
 
 def route_by_source(state: IngestionState) -> IngestionState:
     """Deterministic router: a deleted object has nothing to fetch/parse --
@@ -116,21 +126,32 @@ def fetch_unstructured_node(state: IngestionState) -> IngestionState:
     handle the Connector Agent already proved read-only."""
     object_id = state["event"]["object"]["object_id"]
     try:
-        logger.info("fetch_unstructured: object_id=%s adapter=%s trace_id=%s",
-                    object_id, state["adapter"], state.get("trace_id"))
+        logger.info(
+            "fetch_unstructured: object_id=%s adapter=%s trace_id=%s",
+            object_id,
+            state["adapter"],
+            state.get("trace_id"),
+        )
         state["raw_content"] = _fetch_unstructured_bytes(
-            state["adapter"], state["connection_handle"], object_id,
+            state["adapter"],
+            state["connection_handle"],
+            object_id,
             state.get("_fetch_unstructured"),
         )
-        logger.info("fetch_unstructured: object_id=%s fetched %d bytes",
-                    object_id, len(state["raw_content"] or b""))
+        logger.info(
+            "fetch_unstructured: object_id=%s fetched %d bytes",
+            object_id,
+            len(state["raw_content"] or b""),
+        )
     except Exception as e:
         logger.error("fetch_unstructured failed: object_id=%s error=%s", object_id, e)
         state["errors"] = state["errors"] + ["fetch_unstructured: %s" % e]
     return state
 
 
-def _default_fetch_structured(adapter: str, connection_handle: dict, schema_scope: List[str]) -> dict:
+def _default_fetch_structured(
+    adapter: str, connection_handle: dict, schema_scope: List[str]
+) -> dict:
     """Production default: a real, live connectors/ connector, not a
     simulated one. Only "snowflake" has a real implementation today (see
     connectors/snowflake/) -- an adapter with none raises a clear error
@@ -139,8 +160,10 @@ def _default_fetch_structured(adapter: str, connection_handle: dict, schema_scop
     if adapter != "snowflake":
         raise RuntimeError(
             "fetch_structured: no default fetcher for adapter %r (only 'snowflake' has one; "
-            "inject fetch_structured_fn for others)" % adapter)
+            "inject fetch_structured_fn for others)" % adapter
+        )
     from cce.connectors.fetch import snowflake_schema_fetcher
+
     return snowflake_schema_fetcher()(adapter, connection_handle, schema_scope)
 
 
@@ -148,18 +171,31 @@ def fetch_structured_node(state: IngestionState) -> IngestionState:
     """Fetch a schema card (schema + sample rows) for the structured lane."""
     schema_scope = state.get("schema_scope", [])
     try:
-        logger.info("fetch_structured: adapter=%s schema_scope=%s trace_id=%s",
-                    state["adapter"], schema_scope, state.get("trace_id"))
+        logger.info(
+            "fetch_structured: adapter=%s schema_scope=%s trace_id=%s",
+            state["adapter"],
+            schema_scope,
+            state.get("trace_id"),
+        )
         state["raw_content"] = _fetch_structured_card(
-            state["adapter"], state["connection_handle"], schema_scope,
+            state["adapter"],
+            state["connection_handle"],
+            schema_scope,
             state.get("_fetch_structured") or _default_fetch_structured,
         )
         tables = (state["raw_content"] or {}).get("tables", [])
-        logger.info("fetch_structured: schema=%s fetched %d tables",
-                    (state["raw_content"] or {}).get("schema"), len(tables))
+        logger.info(
+            "fetch_structured: schema=%s fetched %d tables",
+            (state["raw_content"] or {}).get("schema"),
+            len(tables),
+        )
     except Exception as e:
-        logger.error("fetch_structured failed: adapter=%s schema_scope=%s error=%s",
-                     state["adapter"], schema_scope, e)
+        logger.error(
+            "fetch_structured failed: adapter=%s schema_scope=%s error=%s",
+            state["adapter"],
+            schema_scope,
+            e,
+        )
         state["errors"] = state["errors"] + ["fetch_structured: %s" % e]
     return state
 
@@ -171,10 +207,15 @@ def _default_metadata_repository() -> Optional[MetadataRepository]:
     a metadata-repository outage or absence must never block the SDK emit,
     which stays this pipeline's critical path (see
     persist_structured_metadata_node's docstring)."""
-    dsn = os.environ.get("CCE_CONTROL_DATABASE_URL") or os.environ.get("CCE_METADATA_DATABASE_URL")
+    dsn = os.environ.get("CCE_CONTROL_DATABASE_URL") or os.environ.get(
+        "CCE_METADATA_DATABASE_URL"
+    )
     if not dsn:
         return None
-    from cce.persistence.postgres.metadata_repository import PostgreSQLMetadataRepository
+    from cce.persistence.postgres.metadata_repository import (
+        PostgreSQLMetadataRepository,
+    )
+
     return PostgreSQLMetadataRepository(dsn)
 
 
@@ -194,6 +235,7 @@ def _resolve_schema_database(adapter: str, explicit: Optional[str]) -> Optional[
     if adapter == "snowflake":
         try:
             from cce.connectors.structured.snowflake.config import build_config_from_env
+
             return build_config_from_env().database
         except KeyError:
             return None
@@ -227,11 +269,14 @@ def persist_structured_metadata_node(state: IngestionState) -> IngestionState:
             repo = _default_metadata_repository()
         if repo is None:
             state["warnings"] = state["warnings"] + [
-                "persist_structured_metadata: CCE_CONTROL_DATABASE_URL not configured, dry-run only"]
+                "persist_structured_metadata: CCE_CONTROL_DATABASE_URL not configured, dry-run only"
+            ]
             return state
 
         adapter = state["adapter"]
-        database_name = _resolve_schema_database(adapter, state.get("schema_database")) or "default"
+        database_name = (
+            _resolve_schema_database(adapter, state.get("schema_database")) or "default"
+        )
         source_id = repo.ensure_source(adapter, state["source_id"])
         namespace_type = "catalog" if adapter == "snowflake" else "database"
         namespace_id = repo.ensure_namespace(source_id, database_name, namespace_type)
@@ -240,37 +285,58 @@ def persist_structured_metadata_node(state: IngestionState) -> IngestionState:
 
         tables = schema_card.get("tables", [])
         schema_hash = hashlib.sha256(
-            json.dumps(tables, sort_keys=True, default=str).encode()).hexdigest()
+            json.dumps(tables, sort_keys=True, default=str).encode()
+        ).hexdigest()
         snapshot_id = str(uuid.uuid4())
-        repo.save_snapshot(SchemaSnapshot(
-            snapshot_id=snapshot_id, source_id=source_id, schema_id=schema_id,
-            captured_at=datetime.now(timezone.utc), schema_hash=schema_hash, status="SUCCESS",
-            table_count=len(tables), column_count=sum(len(t.get("columns", [])) for t in tables),
-        ))
+        repo.save_snapshot(
+            SchemaSnapshot(
+                snapshot_id=snapshot_id,
+                source_id=source_id,
+                schema_id=schema_id,
+                captured_at=datetime.now(timezone.utc),
+                schema_hash=schema_hash,
+                status="SUCCESS",
+                table_count=len(tables),
+                column_count=sum(len(t.get("columns", [])) for t in tables),
+            )
+        )
 
         for table in tables:
-            table_id = repo.save_table({
-                "snapshot_id": snapshot_id, "schema_id": schema_id,
-                "table_name": table.get("name"), "table_type": "TABLE",
-                "row_count": table.get("row_count"),
-            })
+            table_id = repo.save_table(
+                {
+                    "snapshot_id": snapshot_id,
+                    "schema_id": schema_id,
+                    "table_name": table.get("name"),
+                    "table_type": "TABLE",
+                    "row_count": table.get("row_count"),
+                }
+            )
             for ordinal, col in enumerate(table.get("columns", []), start=1):
-                data_type, type_detail = canonicalize_type(col.get("type") or "", adapter)
-                repo.save_column({
-                    "snapshot_id": snapshot_id, "table_id": table_id,
-                    "column_name": col.get("name"), "ordinal_position": ordinal,
-                    "data_type": data_type, "type_detail": type_detail,
-                    "native_data_type": col.get("type"),
-                    "is_nullable": col.get("nullable", True),
-                    "numeric_precision": type_detail.get("precision"),
-                    "numeric_scale": type_detail.get("scale"),
-                    "character_maximum_length": type_detail.get("length"),
-                })
+                data_type, type_detail = canonicalize_type(
+                    col.get("type") or "", adapter
+                )
+                repo.save_column(
+                    {
+                        "snapshot_id": snapshot_id,
+                        "table_id": table_id,
+                        "column_name": col.get("name"),
+                        "ordinal_position": ordinal,
+                        "data_type": data_type,
+                        "type_detail": type_detail,
+                        "native_data_type": col.get("type"),
+                        "is_nullable": col.get("nullable", True),
+                        "numeric_precision": type_detail.get("precision"),
+                        "numeric_scale": type_detail.get("scale"),
+                        "character_maximum_length": type_detail.get("length"),
+                    }
+                )
 
         state["metadata_snapshot_id"] = snapshot_id
         logger.info(
             "persist_structured_metadata: snapshot_id=%s schema=%s tables=%d columns=%d",
-            snapshot_id, schema_name, len(tables),
+            snapshot_id,
+            schema_name,
+            len(tables),
             sum(len(t.get("columns", [])) for t in tables),
         )
     except Exception as e:
@@ -307,13 +373,22 @@ def parse_document_node(state: IngestionState) -> IngestionState:
             tmp_path = tmp.name
 
         mime_type = detect_mime_type(tmp_path)
-        logger.info("parse_document: object_id=%s mime_type=%s size=%d bytes",
-                    object_id, mime_type, len(raw))
+        logger.info(
+            "parse_document: object_id=%s mime_type=%s size=%d bytes",
+            object_id,
+            mime_type,
+            len(raw),
+        )
         parser = ParserFactory.get_parser(mime_type)
         if parser is None:
-            logger.error("parse_document: object_id=%s unsupported mime_type=%s", object_id, mime_type)
+            logger.error(
+                "parse_document: object_id=%s unsupported mime_type=%s",
+                object_id,
+                mime_type,
+            )
             state["errors"] = state["errors"] + [
-                "parse_document: unsupported mime type %s" % mime_type]
+                "parse_document: unsupported mime type %s" % mime_type
+            ]
             return state
 
         doc_metadata = DocumentMetadata(
@@ -323,19 +398,30 @@ def parse_document_node(state: IngestionState) -> IngestionState:
             mime_type=mime_type,
         )
         result = parser.parse(tmp_path, doc_metadata)
+        if result.status.value == "PARTIAL":
+            state["errors"] = state["errors"] + (list(result.errors) or ["parse_document: incomplete document extraction"])
         if result.status.value in ("SUCCESS", "PARTIAL"):
             state["parsed_doc"] = result.document.model_dump(mode="json")
             elements = state["parsed_doc"].get("elements", [])
-            logger.info("parse_document: object_id=%s status=%s -> %d elements",
-                        object_id, result.status.value, len(elements))
+            logger.info(
+                "parse_document: object_id=%s status=%s -> %d elements",
+                object_id,
+                result.status.value,
+                len(elements),
+            )
             if result.warnings:
                 state["warnings"] = state["warnings"] + list(result.warnings)
         else:
-            logger.error("parse_document: object_id=%s parser reported status=%s",
-                         object_id, result.status.value)
+            logger.error(
+                "parse_document: object_id=%s parser reported status=%s",
+                object_id,
+                result.status.value,
+            )
             state["errors"] = state["errors"] + (
-                list(result.errors) if result.errors
-                else ["parse_document: parser reported %s" % result.status.value])
+                list(result.errors)
+                if result.errors
+                else ["parse_document: parser reported %s" % result.status.value]
+            )
     except Exception as e:
         logger.error("parse_document failed: object_id=%s error=%s", object_id, e)
         state["errors"] = state["errors"] + ["parse_document: %s" % e]
@@ -353,13 +439,20 @@ def normalize_document_node(state: IngestionState) -> IngestionState:
     shape. Unstructured: parsed_doc is already that shape, passed through.
     Structured: raw_content (the schema card) is converted to blocks."""
     try:
-        source_payload = state.get("parsed_doc") if state["kind"] == "unstructured" \
+        source_payload = (
+            state.get("parsed_doc")
+            if state["kind"] == "unstructured"
             else state.get("raw_content")
+        )
         state["normalized_doc"] = normalize_to_canonical(
-            source_payload, state["kind"], source_database=state["adapter"])
+            source_payload, state["kind"], source_database=state["adapter"]
+        )
         elements = (state["normalized_doc"] or {}).get("elements", [])
-        logger.info("normalize_document: kind=%s -> %d canonical elements",
-                    state["kind"], len(elements))
+        logger.info(
+            "normalize_document: kind=%s -> %d canonical elements",
+            state["kind"],
+            len(elements),
+        )
     except Exception as e:
         logger.error("normalize_document failed: kind=%s error=%s", state["kind"], e)
         state["errors"] = state["errors"] + ["normalize_document: %s" % e]
@@ -379,7 +472,10 @@ def _iter_text_blocks(elements: List[dict]):
                 continue
             cell_text = cell.get("text")
             if cell_text:
-                yield "%s:cell:%s:%s" % (el.get("id"), cell.get("row"), cell.get("col")), cell_text
+                yield (
+                    "%s:cell:%s:%s" % (el.get("id"), cell.get("row"), cell.get("col")),
+                    cell_text,
+                )
 
 
 def classify_for_dlp_node(state: IngestionState) -> IngestionState:
@@ -399,7 +495,10 @@ def classify_for_dlp_node(state: IngestionState) -> IngestionState:
         for v in block_verdicts:
             if rank[v["sensitivity"]] > rank[max_sensitivity]:
                 max_sensitivity = v["sensitivity"]
-        state["dlp_verdict"] = {"sensitivity": max_sensitivity, "block_verdicts": block_verdicts}
+        state["dlp_verdict"] = {
+            "sensitivity": max_sensitivity,
+            "block_verdicts": block_verdicts,
+        }
     except Exception as e:
         state["warnings"] = state["warnings"] + ["classify_for_dlp: %s" % e]
         state["dlp_verdict"] = {"sensitivity": "INTERNAL", "block_verdicts": []}
@@ -409,7 +508,10 @@ def classify_for_dlp_node(state: IngestionState) -> IngestionState:
 def _should_redact(block_verdict: dict, threshold: float) -> bool:
     if block_verdict["sensitivity"] == "PII":
         return True
-    if block_verdict["sensitivity"] == "INTERNAL" and block_verdict.get("confidence", 0) >= threshold:
+    if (
+        block_verdict["sensitivity"] == "INTERNAL"
+        and block_verdict.get("confidence", 0) >= threshold
+    ):
         return True
     return False
 
@@ -435,7 +537,9 @@ def redact_if_needed_node(state: IngestionState) -> IngestionState:
             for cell in el.get("cells") or []:
                 if not isinstance(cell, dict):
                     continue
-                cv = by_block.get("%s:cell:%s:%s" % (el.get("id"), cell.get("row"), cell.get("col")))
+                cv = by_block.get(
+                    "%s:cell:%s:%s" % (el.get("id"), cell.get("row"), cell.get("col"))
+                )
                 if cv and _should_redact(cv, threshold) and cell.get("text"):
                     cell["text"] = redact_text(cell["text"])
         state["redacted_doc"] = redacted
@@ -451,11 +555,14 @@ def _default_sdk_emit(payload: dict) -> dict:
     have an SDK endpoint to hand off to (see .env.example)."""
     endpoint = os.environ.get("CCE_SDK_ENDPOINT")
     if not endpoint:
-        logger.info("emit_to_sdk: CCE_SDK_ENDPOINT not configured, dry-run only (trace_id=%s)",
-                     payload.get("trace_id"))
+        logger.info(
+            "emit_to_sdk: CCE_SDK_ENDPOINT not configured, dry-run only (trace_id=%s)",
+            payload.get("trace_id"),
+        )
         return {"status": "dry_run", "reason": "CCE_SDK_ENDPOINT not configured"}
 
     import requests
+
     headers = {}
     api_key = os.environ.get("CCE_SDK_API_KEY")
     if api_key:
@@ -475,7 +582,8 @@ def emit_to_sdk_node(state: IngestionState) -> IngestionState:
             "document_id": event["object"]["object_id"],
             "source_id": state["source_id"],
             "revision": event["object"].get("version"),
-            "source_ref": event["object"].get("source_ref") or event["object"]["object_id"],
+            "source_ref": event["object"].get("source_ref")
+            or event["object"]["object_id"],
             "object_id": event["object"]["object_id"],
             "adapter": state["adapter"],
             "kind": state["kind"],
@@ -489,18 +597,27 @@ def emit_to_sdk_node(state: IngestionState) -> IngestionState:
         logger.info(
             "emit_to_sdk: document_id=%s source_id=%s change_type=%s blocks=%d "
             "sensitivity=%s trace_id=%s",
-            payload["document_id"], payload["source_id"], payload["change_type"],
-            len(payload["blocks"]), (payload.get("dlp_verdict") or {}).get("sensitivity"),
+            payload["document_id"],
+            payload["source_id"],
+            payload["change_type"],
+            len(payload["blocks"]),
+            (payload.get("dlp_verdict") or {}).get("sensitivity"),
             payload["trace_id"],
         )
         emit_fn = state.get("_sdk_emit") or _default_sdk_emit
         state["sdk_response"] = emit_fn(payload)
         state["ready_for_sdk"] = True
-        logger.info("emit_to_sdk: document_id=%s response=%s",
-                    payload["document_id"], state["sdk_response"])
+        logger.info(
+            "emit_to_sdk: document_id=%s response=%s",
+            payload["document_id"],
+            state["sdk_response"],
+        )
     except Exception as e:
-        logger.error("emit_to_sdk failed: document_id=%s error=%s",
-                     event.get("object", {}).get("object_id"), e)
+        logger.error(
+            "emit_to_sdk failed: document_id=%s error=%s",
+            event.get("object", {}).get("object_id"),
+            e,
+        )
         state["errors"] = state["errors"] + ["emit_to_sdk: %s" % e]
         state["ready_for_sdk"] = False
     return state
@@ -525,9 +642,15 @@ def checkpoint_node(state: IngestionState) -> IngestionState:
             "metadata_snapshot_id": state.get("metadata_snapshot_id"),
             "trace_id": state["trace_id"],
         }
-        state["ingestion_checkpoint_id"] = store.save(state["source_id"], object_id, checkpoint_data)
-        logger.info("checkpoint: object_id=%s status=%s checkpoint_id=%s",
-                    object_id, checkpoint_data["status"], state["ingestion_checkpoint_id"])
+        state["ingestion_checkpoint_id"] = store.save(
+            state["source_id"], object_id, checkpoint_data
+        )
+        logger.info(
+            "checkpoint: object_id=%s status=%s checkpoint_id=%s",
+            object_id,
+            checkpoint_data["status"],
+            state["ingestion_checkpoint_id"],
+        )
     except Exception as e:
         logger.warning("checkpoint failed (non-fatal): %s", e)
         state["warnings"] = state["warnings"] + ["checkpoint: %s" % e]
@@ -536,7 +659,8 @@ def checkpoint_node(state: IngestionState) -> IngestionState:
 
 # ===== BUILD THE GRAPH =====
 
-def build_ingestion_workflow():
+
+def build_ingestion_workflow(*, grounding_only: bool = False):
     workflow = StateGraph(IngestionState)
 
     workflow.add_node("route", route_by_source)
@@ -555,20 +679,27 @@ def build_ingestion_workflow():
     def route_conditional(state: IngestionState) -> str:
         return state.get("_next_node", "fetch_unstructured")
 
-    workflow.add_conditional_edges("route", route_conditional, {
-        "fetch_unstructured": "fetch_unstructured",
-        "fetch_structured": "fetch_structured",
-        "emit": "emit",
-    })
+    workflow.add_conditional_edges(
+        "route",
+        route_conditional,
+        {
+            "fetch_unstructured": "fetch_unstructured",
+            "fetch_structured": "fetch_structured",
+            "emit": "emit",
+        },
+    )
 
     workflow.add_edge("fetch_unstructured", "parse")
     workflow.add_edge("parse", "normalize")
-    workflow.add_edge("fetch_structured", "persist_structured_metadata")
+    workflow.add_edge(
+        "fetch_structured",
+        "normalize" if grounding_only else "persist_structured_metadata",
+    )
     workflow.add_edge("persist_structured_metadata", "normalize")
     workflow.add_edge("normalize", "classify_dlp")
     workflow.add_edge("classify_dlp", "redact")
     workflow.add_edge("redact", "emit")
-    workflow.add_edge("emit", "checkpoint")
+    workflow.add_edge("emit", END if grounding_only else "checkpoint")
     workflow.add_edge("checkpoint", END)
 
     return workflow.compile()
@@ -576,15 +707,22 @@ def build_ingestion_workflow():
 
 # ===== INVOCATION =====
 
-def run_ingestion(event: Dict[str, Any], connection_handle: dict, source_id: str, *,
-                   trace_id: Optional[str] = None,
-                   schema_scope: Optional[List[str]] = None,
-                   schema_database: Optional[str] = None,
-                   fetch_unstructured_fn: Optional[Callable[[str, dict, str], bytes]] = None,
-                   fetch_structured_fn: Optional[Callable[[str, dict, List[str]], dict]] = None,
-                   sdk_emit_fn: Optional[Callable[[dict], dict]] = None,
-                   checkpoint_store: Optional[IngestionCheckpointStore] = None,
-                   metadata_repository: Optional[MetadataRepository] = None):
+
+def run_ingestion(
+    event: Dict[str, Any],
+    connection_handle: dict,
+    source_id: str,
+    *,
+    trace_id: Optional[str] = None,
+    schema_scope: Optional[List[str]] = None,
+    schema_database: Optional[str] = None,
+    fetch_unstructured_fn: Optional[Callable[[str, dict, str], bytes]] = None,
+    fetch_structured_fn: Optional[Callable[[str, dict, List[str]], dict]] = None,
+    sdk_emit_fn: Optional[Callable[[dict], dict]] = None,
+    checkpoint_store: Optional[IngestionCheckpointStore] = None,
+    metadata_repository: Optional[MetadataRepository] = None,
+    grounding_only: bool = False,
+):
     """Entry point: given one SourceChangeEvent-shaped dict (as produced by
     agents/connector_agent/change_capture.py's observers), run it through
     the full ingestion workflow.
@@ -605,7 +743,7 @@ def run_ingestion(event: Dict[str, Any], connection_handle: dict, source_id: str
     Returns: (success: bool, final_state: IngestionState) -- success is
     "no node recorded an error", not "nothing recorded a warning".
     """
-    workflow = build_ingestion_workflow()
+    workflow = build_ingestion_workflow(grounding_only=grounding_only)
 
     initial_state: IngestionState = {
         "source_id": source_id,

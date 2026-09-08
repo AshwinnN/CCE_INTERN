@@ -15,13 +15,18 @@ network access -- the same fixture-injection convention every other
 live-driver touchpoint in this repo already uses (change_capture.py's
 object_lister/catalog_lister, ingestion's azure blob client).
 """
+
 import logging
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from cce.connectors.base.connection import StructuredConnection
 from cce.connectors.base.connector import StructuredConnector
-from cce.connectors.base.exceptions import ConnectionFailedError, NotConnectedError, WriteAccessDetectedError
+from cce.connectors.base.exceptions import (
+    ConnectionFailedError,
+    NotConnectedError,
+    WriteAccessDetectedError,
+)
 from cce.connectors.base.models import ConnectionConfig
 from cce.security.credentials import load_snowflake_keypair_credential
 
@@ -36,13 +41,17 @@ def _quote_identifier(value: str) -> str:
 
 def _default_driver_connect(**kwargs):
     import snowflake.connector
+
     return snowflake.connector.connect(**kwargs)
 
 
 def _private_key_der(pem: str, passphrase: Optional[str]) -> bytes:
     from cryptography.hazmat.primitives import serialization
+
     raw = pem.replace("\\n", "\n").encode()
-    key = serialization.load_pem_private_key(raw, password=passphrase.encode() if passphrase else None)
+    key = serialization.load_pem_private_key(
+        raw, password=passphrase.encode() if passphrase else None
+    )
     return key.private_bytes(
         encoding=serialization.Encoding.DER,
         format=serialization.PrivateFormat.PKCS8,
@@ -51,9 +60,11 @@ def _private_key_der(pem: str, passphrase: Optional[str]) -> bytes:
 
 
 class SnowflakeConnector(StructuredConnector):
-
-    def __init__(self, config: ConnectionConfig,
-                 driver_connect: Optional[Callable[..., Any]] = None):
+    def __init__(
+        self,
+        config: ConnectionConfig,
+        driver_connect: Optional[Callable[..., Any]] = None,
+    ):
         """Does NOT connect yet -- connect() does that."""
         self.config = config
         self._driver_connect = driver_connect or _default_driver_connect
@@ -62,11 +73,16 @@ class SnowflakeConnector(StructuredConnector):
     def connect(self) -> StructuredConnection:
         logger.info(
             "Connecting to Snowflake: account=%s database=%s schema=%s warehouse=%s",
-            self.config.account_id, self.config.database, self.config.schema, self.config.warehouse,
+            self.config.account_id,
+            self.config.database,
+            self.config.schema,
+            self.config.warehouse,
         )
         try:
             credential = load_snowflake_keypair_credential(self.config.credential_ref)
-            private_key = _private_key_der(credential["private_key_pem"], credential["passphrase"])
+            private_key = _private_key_der(
+                credential["private_key_pem"], credential["passphrase"]
+            )
             self._connection = self._driver_connect(
                 account=self.config.account_id,
                 user=self.config.user,
@@ -79,27 +95,43 @@ class SnowflakeConnector(StructuredConnector):
                 network_timeout=self.config.network_timeout_s,
             )
         except Exception as e:
-            logger.error("Snowflake connect failed: account=%s error=%s", self.config.account_id, e)
+            logger.error(
+                "Snowflake connect failed: account=%s error=%s",
+                self.config.account_id,
+                e,
+            )
             raise ConnectionFailedError("snowflake connect failed: %s" % e) from e
 
         if self.config.write_probe_enabled:
-            logger.info("Running write-probe on account=%s (expecting denial for read-only credentials)",
-                        self.config.account_id)
+            logger.info(
+                "Running write-probe on account=%s (expecting denial for read-only credentials)",
+                self.config.account_id,
+            )
             if self._run_write_probe():
                 # Write succeeded -- this credential is NOT read-only. Close
                 # before raising: a rejected connector must not leak a live
                 # session, and a caller must never receive a handle for it.
-                logger.error("Write-probe succeeded on account=%s -- credential is NOT read-only, rejecting",
-                             self.config.account_id)
+                logger.error(
+                    "Write-probe succeeded on account=%s -- credential is NOT read-only, rejecting",
+                    self.config.account_id,
+                )
                 self.close()
                 raise WriteAccessDetectedError(
                     "write-probe succeeded on account %r -- credential is not read-only"
-                    % self.config.account_id)
-            logger.info("Write-probe denied on account=%s -- read-only confirmed", self.config.account_id)
+                    % self.config.account_id
+                )
+            logger.info(
+                "Write-probe denied on account=%s -- read-only confirmed",
+                self.config.account_id,
+            )
 
         connection_id = "conn_%s_%d" % (self.config.account_id, int(time.time()))
-        logger.info("Connected to Snowflake: account=%s connection_id=%s read_only_verified=%s",
-                    self.config.account_id, connection_id, self.config.write_probe_enabled)
+        logger.info(
+            "Connected to Snowflake: account=%s connection_id=%s read_only_verified=%s",
+            self.config.account_id,
+            connection_id,
+            self.config.write_probe_enabled,
+        )
         return StructuredConnection(
             self,
             connection_id,
@@ -111,6 +143,7 @@ class SnowflakeConnector(StructuredConnector):
         SUCCEEDED (source is NOT read-only), False if it was denied
         (read-only proven)."""
         from snowflake.connector.errors import DatabaseError, ProgrammingError
+
         cursor = self._connection.cursor()
         try:
             cursor.execute("CREATE TEMPORARY TABLE %s (x INT)" % PROBE_TABLE)
@@ -121,9 +154,13 @@ class SnowflakeConnector(StructuredConnector):
         finally:
             cursor.close()
 
-    def get_information_schema_card(self, schema: str, max_tables: Optional[int] = None) -> Dict[str, Any]:
+    def get_information_schema_card(
+        self, schema: str, max_tables: Optional[int] = None
+    ) -> Dict[str, Any]:
         if not self._connection:
-            raise NotConnectedError("get_information_schema_card called before connect()")
+            raise NotConnectedError(
+                "get_information_schema_card called before connect()"
+            )
 
         cursor = self._connection.cursor()
         try:
@@ -142,13 +179,16 @@ class SnowflakeConnector(StructuredConnector):
                 FROM %sinformation_schema.columns
                 WHERE %stable_schema = %%s
                 ORDER BY table_name, ordinal_position
-                """ % (database_prefix, catalog_filter),
+                """
+                % (database_prefix, catalog_filter),
                 params,
             )
             tables: Dict[str, Dict[str, Any]] = {}
             for row in cursor.fetchall():
                 if len(row) == 6:
-                    _, table_schema, table_name, column_name, data_type, is_nullable = row
+                    _, table_schema, table_name, column_name, data_type, is_nullable = (
+                        row
+                    )
                 else:
                     table_schema = schema
                     table_name, column_name, data_type, is_nullable = row
@@ -162,14 +202,20 @@ class SnowflakeConnector(StructuredConnector):
                         "row_count": None,
                         "sample_row": None,
                     }
-                tables[table_name]["columns"].append({
-                    "name": column_name, "type": data_type, "nullable": is_nullable == "YES",
-                })
+                tables[table_name]["columns"].append(
+                    {
+                        "name": column_name,
+                        "type": data_type,
+                        "nullable": is_nullable == "YES",
+                    }
+                )
             return {"schema": schema, "tables": list(tables.values())}
         finally:
             cursor.close()
 
-    def get_schema_card(self, schema: str, max_tables: Optional[int] = None) -> Dict[str, Any]:
+    def get_schema_card(
+        self, schema: str, max_tables: Optional[int] = None
+    ) -> Dict[str, Any]:
         if not self._connection:
             raise NotConnectedError("get_schema_card called before connect()")
         from snowflake.connector.errors import DatabaseError, ProgrammingError
@@ -184,7 +230,9 @@ class SnowflakeConnector(StructuredConnector):
                 row = cursor.fetchone()
                 table["row_count"] = row[0] if row else None
             except (ProgrammingError, DatabaseError):
-                table["row_count"] = None  # no COUNT privilege on this table -- keep columns, skip count
+                table["row_count"] = (
+                    None  # no COUNT privilege on this table -- keep columns, skip count
+                )
 
             try:
                 cursor.execute('SELECT * FROM "%s"."%s" LIMIT 1' % (schema, table_name))
@@ -193,12 +241,16 @@ class SnowflakeConnector(StructuredConnector):
                     col_names = [d[0] for d in cursor.description]
                     table["sample_row"] = dict(zip(col_names, row))
             except (ProgrammingError, DatabaseError):
-                table["sample_row"] = None  # no read grant on this table -- keep columns, skip sample
+                table["sample_row"] = (
+                    None  # no read grant on this table -- keep columns, skip sample
+                )
 
         cursor.close()
         return card
 
-    def execute_query(self, sql: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    def execute_query(
+        self, sql: str, params: Optional[List[Any]] = None
+    ) -> List[Dict[str, Any]]:
         if not self._connection:
             raise NotConnectedError("execute_query called before connect()")
         cursor = self._connection.cursor()
@@ -206,6 +258,24 @@ class SnowflakeConnector(StructuredConnector):
             cursor.execute(sql, params or [])
             col_names = [d[0] for d in cursor.description] if cursor.description else []
             return [dict(zip(col_names, row)) for row in cursor.fetchall()]
+        finally:
+            cursor.close()
+
+    def execute_guarded_query(self, sql: str, *, timeout_seconds: int, max_rows: int):
+        if not self._connection:
+            raise NotConnectedError("execute_guarded_query called before connect()")
+        from cce.runtime.sql_guard import enforce_select_only
+
+        enforce_select_only(sql)
+        cursor = self._connection.cursor()
+        try:
+            cursor.execute(
+                "ALTER SESSION SET STATEMENT_TIMEOUT_IN_SECONDS = %s",
+                (int(timeout_seconds),),
+            )
+            cursor.execute(sql, timeout=int(timeout_seconds))
+            columns = [d[0] for d in cursor.description] if cursor.description else []
+            return [dict(zip(columns, row)) for row in cursor.fetchmany(int(max_rows))]
         finally:
             cursor.close()
 

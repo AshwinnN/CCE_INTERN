@@ -6,6 +6,11 @@ from cce.config import settings
 
 
 class SettingsDatabaseUrlTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def tearDown(self):
         for name in (
             "CCE_ENVIRONMENT",

@@ -78,7 +78,7 @@ def _error(common_pb2, error: dict | None):
     if not error:
         return None
     return common_pb2.Error(
-        code=error.get("code", ""),
-        message=error.get("message", ""),
-        retryable=bool(error.get("retryable", False)),
+        code=error.code,
+        message=error.message,
+        retryable=error.retryable,
     )

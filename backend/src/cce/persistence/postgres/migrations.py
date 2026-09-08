@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import time
 import os
+import time
 from pathlib import Path
 from typing import Iterable
 
 import psycopg2
 
-
-DEFAULT_MIGRATION_DIR = Path(__file__).resolve().parents[4] / "migrations" / "cce_control"
+DEFAULT_MIGRATION_DIR = (
+    Path(__file__).resolve().parents[4] / "migrations" / "cce_control"
+)
 CONTAINER_MIGRATION_DIR = Path("/app/backend/migrations/cce_control")
 MIGRATION_FILES = (
     "001_registry.sql",
@@ -25,6 +26,8 @@ MIGRATION_FILES = (
     "008_local_index.sql",
     "009_local_index_exact_search.sql",
     "011_agentic_plane_refs.sql",
+    "012_domain_governance_lifecycle.sql",
+    "013_runtime_and_jobs.sql",
 )
 LOCAL_INDEX_MIGRATION_FILES = {
     "008_local_index.sql",

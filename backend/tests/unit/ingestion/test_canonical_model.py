@@ -11,6 +11,8 @@ sys.path.insert(
 from cce.connectors.unstructured.azure_blob.connector import AzureBlobSource
 
 
+@pytest.mark.skipif(os.environ.get("CCE_AZURE_BLOB_LIVE_TESTS", "false").lower() != "true",
+                    reason="Explicit CCE_AZURE_BLOB_LIVE_TESTS=true required")
 def test_azure_blob_small_pdf():
     load_dotenv()
 
@@ -88,13 +90,7 @@ def test_azure_blob_small_pdf():
 
         else:
             print("\ndoc: None")
-        text = getattr(elem, "text", "") or ""
 
-        print(
-            f"[{elem.type.value.upper()}] "
-            f"(Page {elem.page_number}): "
-            f"{text[:80]}..."
-        )
 
 
 if __name__ == "__main__":

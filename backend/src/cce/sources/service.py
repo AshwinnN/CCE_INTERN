@@ -2,34 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import threading
 import traceback
 import uuid
+
 from cce.connectors.base.models import ConnectionConfig
 from cce.connectors.factory import ConnectorFactory
 from cce.ingestion.orchestrator import run_ingestion
 from cce.security.credentials import load_credential
 
-
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class SourceOperationResult:
-    source_id: str
-    status: str
-    error: dict | None = None
-
-
-@dataclass(frozen=True)
-class IngestionRunResult:
-    ingestion_run_id: str
-    status: str
-    error: dict | None = None
-    objects_processed: int = 0
-    objects_failed: int = 0
+from cce.sources.models import IngestionRunResult, SourceOperationResult
 
 
 class SourceService:
@@ -41,12 +27,14 @@ class SourceService:
         checkpoint_store,
         index_client,
         run_async: bool = True,
+        ingestion_repository=None,
     ):
         self.source_repository = source_repository
         self.metadata_repository = metadata_repository
         self.checkpoint_store = checkpoint_store
         self.index_client = index_client
         self.run_async = run_async
+        self.ingestion_repository = ingestion_repository
 
     def register_source(
         self,
@@ -69,7 +57,9 @@ class SourceService:
         return SourceOperationResult(source_id=saved_id, status="REGISTERED")
 
     def list_sources(self) -> list[dict]:
-        return [_public_source(source) for source in self.source_repository.list_sources()]
+        return [
+            _public_source(source) for source in self.source_repository.list_sources()
+        ]
 
     def test_connection(self, source_id: str) -> SourceOperationResult:
         try:
@@ -78,12 +68,20 @@ class SourceService:
             return SourceOperationResult(
                 source_id=source_id,
                 status="FAILED",
-                error={"code": "SOURCE_NOT_FOUND", "message": str(exc), "retryable": False},
+                error={
+                    "code": "SOURCE_NOT_FOUND",
+                    "message": str(exc),
+                    "retryable": False,
+                },
             )
         connector = None
         try:
-            logger.info("Testing connection: source_id=%s adapter=%s kind=%s",
-                        source_id, source["adapter"], source["kind"])
+            logger.info(
+                "Testing connection: source_id=%s adapter=%s kind=%s",
+                source_id,
+                source["adapter"],
+                source["kind"],
+            )
             connector = self._build_connector(source)
             connector.connect()
             if source["kind"] == "structured":
@@ -98,7 +96,9 @@ class SourceService:
                 status="CONNECTED",
             )
         except Exception as exc:
-            logger.exception("Source connection test failed for source_id=%s", source_id)
+            logger.exception(
+                "Source connection test failed for source_id=%s", source_id
+            )
             return SourceOperationResult(
                 source_id=str(source["source_id"]),
                 status="FAILED",
@@ -122,7 +122,19 @@ class SourceService:
             return IngestionRunResult(
                 ingestion_run_id="",
                 status="FAILED",
-                error={"code": "SOURCE_NOT_FOUND", "message": str(exc), "retryable": False},
+                error={
+                    "code": "SOURCE_NOT_FOUND",
+                    "message": str(exc),
+                    "retryable": False,
+                },
+            )
+        if self.ingestion_repository is not None:
+            run = self.ingestion_repository.create_or_resume(source["source_id"])
+            return IngestionRunResult(
+                ingestion_run_id=str(run.ingestion_run_id),
+                status=run.status,
+                objects_processed=run.objects_processed,
+                objects_failed=run.objects_failed,
             )
         trace_id = "trc_%s" % uuid.uuid4().hex
         run_id = self.source_repository.create_ingestion_run(
@@ -141,6 +153,21 @@ class SourceService:
         return self.get_ingestion_status(run_id)
 
     def get_ingestion_status(self, run_id: str) -> IngestionRunResult:
+        if self.ingestion_repository is not None:
+            run = self.ingestion_repository.get(run_id)
+            return IngestionRunResult(
+                ingestion_run_id=str(run.ingestion_run_id),
+                status=run.status,
+                objects_processed=run.objects_processed,
+                objects_failed=run.objects_failed,
+                error={
+                    "code": "INGESTION_FAILED",
+                    "message": run.error,
+                    "retryable": run.status == "PARTIAL",
+                }
+                if run.error
+                else None,
+            )
         row = self.source_repository.get_ingestion_run(run_id)
         if row is None:
             return IngestionRunResult(
@@ -173,7 +200,11 @@ class SourceService:
         connector = None
         logger.info(
             "Starting ingestion: run_id=%s source_id=%s adapter=%s kind=%s trace_id=%s",
-            run_id, source.get("source_id"), source["adapter"], source["kind"], trace_id,
+            run_id,
+            source.get("source_id"),
+            source["adapter"],
+            source["kind"],
+            trace_id,
         )
         try:
             connector = self._build_connector(source)
@@ -184,7 +215,9 @@ class SourceService:
                 failed += 0 if success else 1
                 errors.extend(state.get("errors", []))
             else:
-                listed = connector.list_objects((source.get("config") or {}).get("prefix"))
+                listed = connector.list_objects(
+                    (source.get("config") or {}).get("prefix")
+                )
                 objects = listed.get("objects", [])
                 max_files = (source.get("config") or {}).get("max_files")
                 if max_files is not None:
@@ -193,22 +226,39 @@ class SourceService:
                         raise ValueError("source config max_files must be at least 1")
                     logger.info(
                         "Applying max_files limit: run_id=%s listed=%d max_files=%d -> %d objects to process",
-                        run_id, len(objects), max_files, min(max_files, len(objects)),
+                        run_id,
+                        len(objects),
+                        max_files,
+                        min(max_files, len(objects)),
                     )
                     objects = objects[:max_files]
-                logger.info("Processing %d objects for run_id=%s source_id=%s",
-                            len(objects), run_id, source.get("source_id"))
+                logger.info(
+                    "Processing %d objects for run_id=%s source_id=%s",
+                    len(objects),
+                    run_id,
+                    source.get("source_id"),
+                )
                 for index, obj in enumerate(objects, start=1):
-                    logger.info("Processing object %d/%d: object_id=%s run_id=%s",
-                                index, len(objects), obj.get("object_id"), run_id)
-                    success, state = self._run_unstructured(source, connector, obj, trace_id)
+                    logger.info(
+                        "Processing object %d/%d: object_id=%s run_id=%s",
+                        index,
+                        len(objects),
+                        obj.get("object_id"),
+                        run_id,
+                    )
+                    success, state = self._run_unstructured(
+                        source, connector, obj, trace_id
+                    )
                     processed += 1 if success else 0
                     failed += 0 if success else 1
                     errors.extend(state.get("errors", []))
             status = "SUCCESS" if failed == 0 else "FAILED"
             logger.info(
                 "Ingestion finished: run_id=%s status=%s processed=%d failed=%d",
-                run_id, status, processed, failed,
+                run_id,
+                status,
+                processed,
+                failed,
             )
             self.source_repository.update_ingestion_run(
                 run_id,
@@ -244,7 +294,9 @@ class SourceService:
             {"connection_id": "source-service"},
             source_id=str(source["source_id"]),
             trace_id=trace_id,
-            fetch_unstructured_fn=lambda adapter, handle, object_id: connector.fetch_object(object_id),
+            fetch_unstructured_fn=lambda adapter, handle, object_id: (
+                connector.fetch_object(object_id)
+            ),
             sdk_emit_fn=self.index_client.index,
             checkpoint_store=self.checkpoint_store,
             metadata_repository=self.metadata_repository,
@@ -262,9 +314,11 @@ class SourceService:
             trace_id=trace_id,
             schema_scope=schema_scope,
             schema_database=config.get("database"),
-            fetch_structured_fn=lambda adapter, handle, scope: connector.get_schema_card(
-                scope[0] if scope else schema or "PUBLIC",
-                max_tables=config.get("max_tables"),
+            fetch_structured_fn=lambda adapter, handle, scope: (
+                connector.get_schema_card(
+                    scope[0] if scope else schema or "PUBLIC",
+                    max_tables=config.get("max_tables"),
+                )
             ),
             sdk_emit_fn=self.index_client.index,
             checkpoint_store=self.checkpoint_store,
@@ -273,8 +327,12 @@ class SourceService:
 
     def _build_connector(self, source: dict):
         config = source.get("config") or {}
-        logger.info("Building connector: source_id=%s adapter=%s kind=%s",
-                    source.get("source_id"), source["adapter"], source["kind"])
+        logger.info(
+            "Building connector: source_id=%s adapter=%s kind=%s",
+            source.get("source_id"),
+            source["adapter"],
+            source["kind"],
+        )
         if source["kind"] == "structured":
             return ConnectorFactory.create(
                 ConnectionConfig(
@@ -301,7 +359,9 @@ class SourceService:
         if source["adapter"] == "azure-blob":
             container_name = config.get("container") or config.get("container_name")
             if not container_name:
-                raise ValueError("azure-blob source config requires container or container_name")
+                raise ValueError(
+                    "azure-blob source config requires container or container_name"
+                )
             return ConnectorFactory.create_unstructured(
                 "azure-blob",
                 connection_string=load_credential(source["credential_ref"]),
@@ -349,7 +409,9 @@ def _redact_secrets(value):
     }
     if isinstance(value, dict):
         return {
-            key: "[REDACTED]" if key.lower() in sensitive_keys else _redact_secrets(item)
+            key: "[REDACTED]"
+            if key.lower() in sensitive_keys
+            else _redact_secrets(item)
             for key, item in value.items()
         }
     if isinstance(value, list):

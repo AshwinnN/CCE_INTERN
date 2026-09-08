@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Generate Python protobuf/gRPC code from backend/proto into backend/src/cce/gen."""
 
-from pathlib import Path
 import subprocess
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
@@ -18,12 +17,17 @@ def main() -> int:
         print("No proto files found under %s" % PROTO_ROOT, file=sys.stderr)
         return 1
     OUT.mkdir(parents=True, exist_ok=True)
+    import grpc_tools
+
+    well_known = Path(grpc_tools.__file__).parent / "_proto"
     cmd = [
         sys.executable,
         "-m",
         "grpc_tools.protoc",
         "-I",
         str(PROTO_ROOT),
+        "-I",
+        str(well_known),
         "--python_out",
         str(OUT),
         "--grpc_python_out",

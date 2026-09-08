@@ -1,15 +1,21 @@
-"""Steward-facing governance use cases."""
+from cce.governance.models import ProposalFilter, ReviewRequest
 
 
 class GovernanceService:
-    def list_proposals(self):
-        return []
+    def __init__(self, repository):
+        self.repository = repository
 
-    def get_proposal(self, proposal_id: str):
-        return {"proposal_id": proposal_id, "status": "NOT_FOUND"}
+    def list_proposals(self, filters: ProposalFilter | None = None):
+        return self.repository.list(filters or ProposalFilter())
 
-    def approve_proposal(self, proposal_id: str, comment: str | None = None):
-        return {"proposal_id": proposal_id, "status": "NOT_FOUND"}
+    def get_proposal(self, proposal_id):
+        return self.repository.get(proposal_id)
 
-    def reject_proposal(self, proposal_id: str, reason: str | None = None):
-        return {"proposal_id": proposal_id, "status": "NOT_FOUND"}
+    def edit_proposal(self, request: ReviewRequest):
+        return self.repository.review(request, "EDIT")
+
+    def approve_proposal(self, request: ReviewRequest):
+        return self.repository.review(request, "APPROVE")
+
+    def reject_proposal(self, request: ReviewRequest):
+        return self.repository.review(request, "REJECT")

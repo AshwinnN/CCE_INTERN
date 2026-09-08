@@ -3,8 +3,10 @@ syntax = "proto3";
 package cce.v1;
 
 import "cce/v1/common.proto";
+import "google/protobuf/struct.proto";
 
 service PackageService {
+  rpc GetActivePackage(GetActivePackageRequest) returns (PackageVersion);
   rpc GetPackage(GetPackageRequest) returns (Package);
   rpc ListPackages(ListPackagesRequest) returns (ListPackagesResponse);
   rpc GetPackageVersion(GetPackageVersionRequest) returns (PackageVersion);
@@ -35,6 +37,7 @@ message Package {
   string package_id = 1;
   string name = 2;
   string active_version = 3;
+  string domain_id = 5;
   Error error = 4;
 }
 
@@ -47,4 +50,7 @@ message PackageVersion {
   string scope = 6;
   string created_at = 7;
   string parent_version = 8;
+  google.protobuf.Struct snapshot = 9;
 }
+
+message GetActivePackageRequest { string domain_id = 1; Actor actor = 2; }
