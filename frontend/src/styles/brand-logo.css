@@ -1,0 +1,17 @@
+.brand-logo {
+  display: block;
+  width: 150px;
+  height: auto;
+}
+
+.footer-logo {
+  display: block;
+  width: 100px;
+  height: auto;
+}
+
+@media (max-width: 600px) {
+  .brand-logo {
+    width: 130px;
+  }
+}

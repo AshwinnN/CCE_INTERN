@@ -1,0 +1,31 @@
+.query-results {
+  margin-top: 42px;
+}
+
+.context-off-title {
+  color: var(--danger);
+}
+
+.response-details {
+  display: grid;
+  gap: 8px;
+}
+
+.response-details details {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.response-details summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 650;
+  word-break: break-word;
+}
+
+.response-details .json-view {
+  margin: 0 10px 10px;
+}

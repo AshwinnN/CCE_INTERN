@@ -4,6 +4,11 @@ export const appConfig = {
     '/api'
   ).replace(/\/$/, ''),
 
+  queryTimeoutMs: Number(
+    import.meta.env.VITE_QUERY_TIMEOUT_MS ||
+    600000,
+  ),
+
   demoUsername:
     import.meta.env.VITE_DEMO_USERNAME ||
     'cce-admin',

@@ -42,7 +42,9 @@ copy .env.example .env
 Edit `.env` if needed:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+VITE_API_BASE_URL=/api
+VITE_BACKEND_URL=http://localhost:8081
+VITE_QUERY_TIMEOUT_MS=600000
 VITE_DEMO_USERNAME=cce-admin
 VITE_DEMO_PASSWORD=cce-admin
 VITE_ACTOR_ID=cce-demo-user
@@ -50,6 +52,8 @@ VITE_ACTOR_ROLES=ADMIN,STEWARD
 ```
 
 Important: `VITE_*` values are browser-visible. This login is only a temporary UI gate until SSO/authentication is added.
+
+`/api` is proxied to `VITE_BACKEND_URL` only by `npm run dev`. For a deployed frontend, configure the web server to proxy `/api` to the backend, or set `VITE_API_BASE_URL` to an API origin that allows the frontend's origin via CORS. `VITE_QUERY_TIMEOUT_MS` defaults to 10 minutes so a stalled synchronous query does not leave the UI loading forever.
 
 ### 3. Install packages
 

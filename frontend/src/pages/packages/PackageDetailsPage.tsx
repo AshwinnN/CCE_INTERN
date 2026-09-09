@@ -53,13 +53,15 @@ export function PackageDetailsPage() {
       return;
     }
 
+    const requestedPackageId = packageId;
+
     let cancelled = false;
 
     async function load() {
       try {
         const result =
           await getPackage(
-            packageId,
+            requestedPackageId,
           );
 
         if (cancelled) {

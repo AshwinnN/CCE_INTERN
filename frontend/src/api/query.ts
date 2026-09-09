@@ -32,5 +32,8 @@ export function runQuery(
           appConfig.actorRoles,
       },
     },
+    {
+      timeoutMs: appConfig.queryTimeoutMs,
+    },
   );
 }

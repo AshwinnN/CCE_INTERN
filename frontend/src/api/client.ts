@@ -1,54 +1,87 @@
 import { appConfig } from '../config/app';
 
+type ApiRequestOptions = RequestInit & {
+  timeoutMs?: number;
+};
+
 export async function apiRequest<T>(
   path: string,
-  options: RequestInit = {},
+  options: ApiRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(
-    `${appConfig.apiBaseUrl}${path}`,
-    {
-      ...options,
+  const { timeoutMs, signal: callerSignal, ...requestOptions } = options;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = timeoutMs
+    ? window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs)
+    : undefined;
 
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
-    },
-  );
-
-  let body: unknown = null;
+  const abortFromCaller = () => controller.abort();
+  callerSignal?.addEventListener('abort', abortFromCaller, { once: true });
 
   try {
-    body = await response.json();
-  } catch {
-    // Response does not contain JSON.
-  }
+    const response = await fetch(
+      `${appConfig.apiBaseUrl}${path}`,
+      {
+        ...requestOptions,
+        signal: controller.signal,
 
-  if (!response.ok) {
-    let message =
-      `Request failed with status ${response.status}.`;
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      },
+    );
 
-    if (
-      typeof body === 'object' &&
-      body !== null &&
-      'detail' in body
-    ) {
-      const detail = (
-        body as { detail?: unknown }
-      ).detail;
+    let body: unknown = null;
 
-      if (typeof detail === 'string') {
-        message = detail;
-      } else if (detail !== undefined) {
-        message = JSON.stringify(detail);
-      }
+    try {
+      body = await response.json();
+    } catch {
+      // Response does not contain JSON.
     }
 
-    throw new Error(message);
-  }
+    if (!response.ok) {
+      let message =
+        `Request failed with status ${response.status}.`;
 
-  return body as T;
+      if (
+        typeof body === 'object' &&
+        body !== null &&
+        'detail' in body
+      ) {
+        const detail = (
+          body as { detail?: unknown }
+        ).detail;
+
+        if (typeof detail === 'string') {
+          message = detail;
+        } else if (detail !== undefined) {
+          message = JSON.stringify(detail);
+        }
+      }
+
+      throw new Error(message);
+    }
+
+    return body as T;
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(
+        'The request timed out. The query may still be processing on the server; please check the backend logs and try again.',
+      );
+    }
+
+    throw error;
+  } finally {
+    if (timeout !== undefined) {
+      window.clearTimeout(timeout);
+    }
+    callerSignal?.removeEventListener('abort', abortFromCaller);
+  }
 }
 
 /*
@@ -70,10 +103,12 @@ export function api<T>(
 export function post<T>(
   path: string,
   body?: unknown,
+  options?: ApiRequestOptions,
 ): Promise<T> {
   return apiRequest<T>(
     path,
     {
+      ...options,
       method: 'POST',
       body:
         body === undefined
