@@ -27,7 +27,8 @@ class Application:
     index_client: object
     retrieval_service: RetrievalService
     source_service: SourceService
-    domain_repository: object
+    workspace_repository: object
+    feedback_service: object
     job_runner: object
     ready: bool = False
     readiness_message: str = "starting"
@@ -55,7 +56,7 @@ def build_application(settings: Settings) -> Application:
     from cce.ingestion.source_graph import SourceGraph
     from cce.integrations.llm.client import StructuredLLM
     from cce.persistence.postgres.context_repository import ContextRepository
-    from cce.persistence.postgres.domain_repository import DomainRepository
+    from cce.persistence.postgres.workspace_repository import WorkspaceRepository
     from cce.persistence.postgres.governance_repository import GovernanceRepository
     from cce.persistence.postgres.ingestion_repository import IngestionRepository
     from cce.persistence.postgres.job_repository import JobRepository
@@ -66,7 +67,7 @@ def build_application(settings: Settings) -> Application:
     from cce.runtime.sql_pipeline import SQLPipeline
 
     db = LifecycleDB(settings.database_url)
-    domains = DomainRepository(db)
+    workspaces = WorkspaceRepository(db)
     context = ContextRepository(db)
     traces = RuntimeRepository(db)
     ingestion = IngestionRepository(db)
@@ -78,6 +79,8 @@ def build_application(settings: Settings) -> Application:
     checkpoint_store = IngestionCheckpointStore()
     index_client = (
         AgenticPlaneClient(
+            chunk_target_tokens=settings.chunk_target_tokens,
+            chunk_overlap_tokens=settings.chunk_overlap_tokens,
             base_url=settings.agenticplane_base_url,
             api_key=settings.agenticplane_api_key,
             timeout=settings.agenticplane_timeout,
@@ -87,7 +90,7 @@ def build_application(settings: Settings) -> Application:
             dsn=settings.database_url,
         )
         if settings.index_backend == "agentic_plane"
-        else LocalIndexClient(settings.database_url)
+        else LocalIndexClient(settings.database_url, chunk_target_tokens=settings.chunk_target_tokens, chunk_overlap_tokens=settings.chunk_overlap_tokens)
     )
     source_service = SourceService(
         source_repository=source_repository,
@@ -104,7 +107,7 @@ def build_application(settings: Settings) -> Application:
     source_graph = SourceGraph(
         settings,
         ingestion,
-        domains,
+        workspaces,
         context,
         governance,
         GroundingAdapter(source_service),
@@ -118,14 +121,19 @@ def build_application(settings: Settings) -> Application:
     )
     sql = SQLPipeline(settings, llm, SQLExecutor(source_service), traces)
     runtime = RuntimeOrchestrator(
-        settings, llm, domains, context, traces, index_client, sql
+        settings, llm, workspaces, context, traces, index_client, sql
     )
+    from cce.runtime.feedback import FeedbackService
+    from cce.runtime.compound import CompoundQuery
+    feedback = FeedbackService(db,llm,index_client,settings.feedback_top_k)
+    compound = CompoundQuery(runtime,workspaces,context,feedback)
     return Application(
+        feedback_service=feedback,
         settings=settings,
-        query_service=QueryService(runtime),
+        query_service=QueryService(compound),
         governance_service=GovernanceService(governance),
         package_service=ContextPackageService(context),
-        domain_repository=domains,
+        workspace_repository=workspaces,
         job_runner=job_runner,
         source_repository=source_repository,
         metadata_repository=metadata_repository,

@@ -4,6 +4,12 @@ version = "0.1.0"
 description = "CoStrategix Context Engine governed context server"
 requires-python = ">=3.10"
 dependencies = [
+  "mysql-connector-python>=9,<10",
+  "pyodbc>=5,<6",
+  "google-auth>=2,<3",
+  "tiktoken>=0.7,<1",
+  "rapidocr>=3,<4",
+  "onnxruntime>=1.18,<2",
   "sqlglot>=30.0,<31",
   "azure-core==1.41.0",
   "azure-storage-blob==12.30.1",

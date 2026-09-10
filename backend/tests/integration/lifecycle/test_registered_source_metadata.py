@@ -1,15 +1,18 @@
 from uuid import uuid4
 
+from cce.governance.models import WorkspaceCreate
 from cce.ingestion.orchestrator import persist_structured_metadata_node
 from cce.persistence.postgres.metadata_repository import PostgreSQLMetadataRepository
+from test_lifecycle import ADMIN
 
 
 def test_registered_source_catalogue_is_visible_to_package_validation(system):
+    workspace = system.workspaces.create(WorkspaceCreate(name="Metadata catalogue test"), ADMIN)
     source_id = str(uuid4())
     with system.db.transaction() as cur:
         cur.execute(
-            "INSERT INTO cce_source(source_id,adapter,account_id,kind) VALUES(%s,'snowflake',%s,'structured')",
-            (source_id, 'catalogue-' + source_id),
+            "INSERT INTO cce_source(source_id,source_type,name,kind,workspace_uuid) VALUES(%s,'snowflake',%s,'structured',%s)",
+            (source_id, 'catalogue-' + source_id, str(workspace.workspace_uuid)),
         )
     repo = PostgreSQLMetadataRepository(system.db.dsn)
     try:
@@ -27,7 +30,7 @@ def test_registered_source_catalogue_is_visible_to_package_validation(system):
         ]
         assert schema.tables[0].columns[0].name == 'ITEM_ID'
         with system.db.transaction() as cur:
-            cur.execute('SELECT count(*) AS n FROM cce_source WHERE account_id=%s', (source_id,))
+            cur.execute('SELECT count(*) AS n FROM cce_source WHERE name=%s', (source_id,))
             assert cur.fetchone()['n'] == 0
     finally:
         repo.close()

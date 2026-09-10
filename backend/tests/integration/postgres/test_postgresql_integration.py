@@ -45,8 +45,22 @@ class PostgreSQLMetadataRepositoryLiveIntegrationTests(unittest.TestCase):
     def test_full_snapshot_round_trip_and_idempotent_retry(self):
         import datetime
         import uuid
+        import psycopg2
 
-        source_id = self.repo.ensure_source("snowflake", "test_account", "Test Account")
+        dsn = os.environ.get("CCE_CONTROL_DATABASE_URL") or os.environ["CCE_METADATA_DATABASE_URL"]
+        registered_source_id = str(uuid.uuid4())
+        workspace_uuid = str(uuid.uuid4())
+        with psycopg2.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO workspace(workspace_uuid,workspace_id,name,created_by) VALUES(%s,%s,%s,'test')",
+                (workspace_uuid, "metadata_repository_test_workspace", "Metadata repository test"),
+            )
+            cur.execute(
+                "INSERT INTO cce_source(source_id,workspace_uuid,name,source_type,kind) VALUES(%s,%s,'Test Account','snowflake','structured')",
+                (registered_source_id, workspace_uuid),
+            )
+
+        source_id = self.repo.ensure_source("snowflake", registered_source_id, "Test Account")
         namespace_id = self.repo.ensure_namespace(source_id, "ANALYTICS_DB", "catalog")
         schema_id = self.repo.ensure_schema(namespace_id, "PUBLIC")
 

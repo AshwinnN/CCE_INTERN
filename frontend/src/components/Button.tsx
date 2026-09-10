@@ -1,2 +1,0 @@
-import type { ButtonHTMLAttributes } from 'react'
-export function Button({ variant='primary', loading=false, children, disabled, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'|'secondary'|'danger'|'ghost'; loading?: boolean }) { return <button className={`btn btn-${variant}`} disabled={disabled || loading} {...props}>{loading && <span className="mini-spinner"/>}{children}</button> }

@@ -1,4 +1,4 @@
-"""Validated, domain-neutral governed asset contracts."""
+"""Validated, workspace-neutral governed asset contracts."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ class Evidence(Model):
 class GovernedAsset(Model):
     asset_id: UUID
     asset_revision_id: UUID
-    domain_id: UUID
+    workspace_uuid: UUID
     revision_no: int
     payload: Asset
     evidence: list[Evidence] = Field(default_factory=list)
@@ -112,7 +112,7 @@ class GovernedAsset(Model):
 
 class PackageSnapshot(Model):
     package_id: UUID
-    domain_id: UUID
+    workspace_uuid: UUID
     package_version_id: UUID
     version: int
     status: str = "ACTIVE"

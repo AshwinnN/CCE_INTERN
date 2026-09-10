@@ -1,0 +1,35 @@
+syntax = "proto3";
+package cce.v1;
+import "cce/v1/common.proto";
+import "google/protobuf/struct.proto";
+service WorkspaceService {
+  rpc CreateWorkspace(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListWorkspaces(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetWorkspace(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc UpdateWorkspace(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ArchiveWorkspace(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListSourceTypes(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc DiscoverSources(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc RegisterSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListSources(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc UpdateSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ArchiveSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc TestSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc IngestSource(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetIngestionRun(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListProposals(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetProposal(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc EditProposal(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ApproveProposal(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc RejectProposal(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetPackage(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc RenamePackage(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc ListVersions(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc GetVersion(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc Query(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc Feedback(WorkspaceRequest) returns (WorkspaceResponse);
+  rpc Retrieve(WorkspaceRequest) returns (WorkspaceResponse);
+}
+message WorkspaceRequest { string workspace_id = 1; string resource_id = 2; Actor actor = 3; google.protobuf.Struct payload = 4; }
+message WorkspaceResponse { google.protobuf.Value data = 1; }

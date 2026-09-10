@@ -49,7 +49,7 @@ class MetadataRepository(ABC):
     @abstractmethod
     def ensure_source(self, adapter: str, account_id: str,
                        display_name: Optional[str] = None) -> str:
-        """Get-or-create a cce_source row. Returns source_id."""
+        """Resolve an already Workspace-registered cce_source row by its UUID. Returns source_id."""
 
     @abstractmethod
     def ensure_namespace(self, source_id: str, namespace_name: str, namespace_type: str) -> str:

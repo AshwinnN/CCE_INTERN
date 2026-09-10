@@ -12,7 +12,7 @@ implementation remains available for offline and developer testing.
 
 CCE code outside `cce.integrations.agentic_plane` depends on a small boundary:
 index, search, delete and graph operations. Production AgenticPlane integration
-lives in `AgenticPlaneClient`. It sends raw chunk text to AgenticPlane for
+lives in `AgenticPlaneClient`. It sends Markdown-rendered content-element chunks plus structured metadata to AgenticPlane for
 server-side embedding and records only the returned memory references in CCE's
 `cce_agentic_plane_memory` bridge table. AgenticPlane owns chunk text and
 vectors plus graph entities/relationships; CCE owns references, source
@@ -39,7 +39,7 @@ maps that exception to an explicit unsupported graph block.
 ## Consequences
 
 The local pgvector index may store normalized chunks and embeddings in
-`cce_control` for MVP proof. It is not a domain package store, a governance
+`cce_control` for MVP proof. It is not a Workspace package store, a governance
 store, a long-term graph store or a bypass around the approved-context runtime.
 
 The SDK-backed adapter implements memory index/search/per-memory delete,
@@ -49,3 +49,5 @@ require `GRAPH_ENABLED=true` and a running ArcadeDB service (the AgenticPlane
 than empty successes. The governed runtime read path, context assembly,
 governance and packages remain separate work and are not made complete by this
 ADR.
+
+Chunking now defaults to 1000 `cl100k_base` tokens with 125-token textual overlap. Small tables stay atomic; oversized tables do not overlap. Hosted writes still use SDK-generated memory IDs; stable CCE chunk IDs in metadata alone do not guarantee idempotent hosted writes.

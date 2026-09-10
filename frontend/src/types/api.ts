@@ -1,14 +1,2 @@
-export type Domain = { domain_id: string; name: string; description: string; tags: string[]; metadata: Record<string, unknown>; enabled: boolean; has_active_package: boolean }
-export type Source = { source_id: string; adapter: string; account_id?: string; kind?: string; credential_ref?: string; config: Record<string, unknown>; enabled?: boolean; created_at?: string; updated_at?: string }
-export type OperationError = { code: string; message: string; retryable?: boolean }
-export type SourceOperationResult = { source_id: string; status: string; error?: OperationError }
-export type IngestionRun = { ingestion_run_id: string; status: string; error?: OperationError; objects_processed: number; objects_failed: number }
-export type Proposal = { proposal_id: string; proposal_batch_id: string; domain_id: string; operation: string; target_asset_id?: string | null; machine_payload: Asset; reviewed_payload: Asset; status: 'PROPOSED'|'APPROVED'|'REJECTED'; evidence: Evidence[]; resolved_by?: string | null; resolved_at?: string | null }
-export type Evidence = { evidence_id: string; source_id: string; source_item_id: string; source_uri: string; document_id: string; element_id?: string | null; agentic_memory_id?: string | null; ingestion_run_id: string; content_hash: string; metadata: Record<string, unknown> }
-export type Asset = Record<string, any> & { asset_type: AssetType; canonical_key: string; dependencies: string[]; metadata: Record<string, unknown> }
-export type AssetType = 'GLOSSARY'|'POLICY_RULE'|'SEMANTIC_MAPPING'|'ENTITY'|'RELATIONSHIP'|'VERIFIED_SQL'|'AMBIGUITY'
-export type PackageInfo = { package_id: string; domain_id: string; name: string }
-export type PackageSnapshot = { package_id: string; domain_id: string; package_version_id: string; version: number; status: string; assets: GovernedAsset[] }
-export type GovernedAsset = { asset_id: string; asset_revision_id: string; domain_id: string; revision_no: number; payload: Asset; evidence: Evidence[]; approved_by?: string | null }
-export type QueryBranch = { status: string; error_code?: string | null; message?: string | null; answer?: string | null; sql?: string | null; sql_attempts: any[]; rows: Record<string, unknown>[]; citations: any[]; context_used: any[]; warnings: string[] }
-export type QueryResponse = { trace_id: string; question: string; domain: { domain_id?: string|null; name?: string|null; confidence?: number|null; status: string; message?: string|null }; package: { package_id?: string|null; package_version_id?: string|null; version?: number|null; status: string }; context_on: QueryBranch; context_off: QueryBranch; proof: { classification: string; explanation: string; comparable: boolean }; errors: { node: string; message: string }[] }
+export interface Workspace { workspace_id: string; name: string; description: string; status: 'ACTIVE' | 'ARCHIVED' }
+export interface Citation { label: string; coordinates: Record<string, unknown> }

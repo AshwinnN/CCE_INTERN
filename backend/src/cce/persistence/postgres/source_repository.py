@@ -1,151 +1,65 @@
-"""PostgreSQL source repository for minimal source registration."""
-
-from __future__ import annotations
-
-import uuid
-
-import psycopg2
-import psycopg2.extras
-
-
-_CCE_UUID_NAMESPACE = uuid.UUID("6f1b1a2e-6c1a-4b8e-9f2a-9e3b7c2d5a10")
+from uuid import uuid4
+from cce.persistence.postgres.lifecycle_db import LifecycleDB, json_param
 
 
 class PostgresSourceRepository:
-    def __init__(self, dsn: str):
-        self._dsn = dsn
+    def __init__(self, dsn): self.db=LifecycleDB(dsn)
 
-    def save_source(
-        self,
-        adapter: str,
-        source_id: str,
-        credential_ref: str | None = None,
-        kind: str | None = None,
-        config: dict | None = None,
-        enabled: bool = True,
-    ) -> str:
-        stable_id = str(
-            uuid.uuid5(_CCE_UUID_NAMESPACE, f"rpc-source:{adapter}:{source_id}")
-        )
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO cce_source (
-                        source_id, adapter, account_id, kind, credential_ref, config, enabled, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, now())
-                    ON CONFLICT (adapter, account_id)
-                    DO UPDATE SET
-                        kind = EXCLUDED.kind,
-                        credential_ref = EXCLUDED.credential_ref,
-                        config = EXCLUDED.config,
-                        enabled = EXCLUDED.enabled,
-                        updated_at = now()
-                    RETURNING source_id
-                    """,
-                    (
-                        stable_id,
-                        adapter,
-                        source_id,
-                        kind,
-                        credential_ref,
-                        psycopg2.extras.Json(config or {}),
-                        enabled,
-                    ),
-                )
-                row = cur.fetchone()
-                conn.commit()
-        return str(row[0])
+    def require_workspace(self, workspace_uuid, cur):
+        cur.execute("SELECT workspace_uuid FROM workspace WHERE workspace_uuid=%s AND status='ACTIVE' FOR SHARE", (str(workspace_uuid),))
+        if not cur.fetchone(): raise KeyError('Active workspace not found')
 
-    def get_source(self, source_id: str) -> dict | None:
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT source_id, adapter, account_id, kind, credential_ref, config, enabled
-                    FROM cce_source
-                    WHERE source_id::text = %s OR account_id = %s
-                    LIMIT 1
-                    """,
-                    (source_id, source_id),
-                )
-                row = cur.fetchone()
-        return dict(row) if row else None
+    def save_source(self, workspace_uuid, name, source_type, credential_ref, kind, config):
+        source_id=uuid4()
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            cur.execute("INSERT INTO cce_source(source_id,workspace_uuid,name,source_type,credential_ref,kind,config,enabled) VALUES(%s,%s,%s,%s,%s,%s,%s,true)",
+                        (str(source_id),str(workspace_uuid),name,source_type,credential_ref,kind,json_param(config)))
+        return self.get_source(workspace_uuid,source_id)
 
-    def list_sources(self) -> list[dict]:
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT source_id, adapter, account_id, kind, credential_ref,
-                           config, enabled, created_at, updated_at
-                    FROM cce_source
-                    ORDER BY created_at, source_id
-                    """
-                )
-                rows = cur.fetchall()
-        return [dict(row) for row in rows]
+    def get_source(self, workspace_uuid, source_id):
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            cur.execute('SELECT * FROM cce_source WHERE workspace_uuid=%s AND source_id=%s', (str(workspace_uuid),str(source_id)))
+            row=cur.fetchone()
+            if not row: raise KeyError('Workspace source not found')
+            return dict(row)
 
-    def create_ingestion_run(self, source_id: str, trace_id: str | None = None) -> str:
-        run_id = str(uuid.uuid4())
-        source = self.get_source(source_id)
-        if source is None:
-            raise KeyError("source %r is not registered" % source_id)
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO cce_ingestion_run (run_id, source_id, status, trace_id)
-                    VALUES (%s, %s, 'RUNNING', %s)
-                    """,
-                    (run_id, source["source_id"], trace_id),
-                )
-                conn.commit()
-        return run_id
+    def get_internal_source(self, source_id):
+        with self.db.transaction() as cur:
+            cur.execute("SELECT s.* FROM cce_source s JOIN workspace w USING(workspace_uuid) WHERE source_id=%s AND w.status='ACTIVE'", (str(source_id),))
+            row=cur.fetchone()
+            if not row: raise KeyError('Source not found')
+            return dict(row)
 
-    def update_ingestion_run(
-        self,
-        run_id: str,
-        status: str,
-        *,
-        objects_processed: int = 0,
-        objects_failed: int = 0,
-        error_message: str | None = None,
-    ) -> None:
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE cce_ingestion_run
-                    SET status = %s,
-                        finished_at = CASE WHEN %s IN ('SUCCESS', 'FAILED') THEN now() ELSE finished_at END,
-                        objects_processed = %s,
-                        objects_failed = %s,
-                        error_message = %s
-                    WHERE run_id = %s
-                    """,
-                    (
-                        status,
-                        status,
-                        objects_processed,
-                        objects_failed,
-                        error_message,
-                        run_id,
-                    ),
-                )
-                conn.commit()
+    def list_sources(self, workspace_uuid):
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            cur.execute("SELECT s.*,to_jsonb(r) latest_ingestion FROM cce_source s LEFT JOIN LATERAL (SELECT run_id,status,started_at,finished_at,objects_processed,objects_failed,error_message FROM cce_ingestion_run WHERE source_id=s.source_id ORDER BY started_at DESC,run_id DESC LIMIT 1) r ON true WHERE s.workspace_uuid=%s AND s.archived_at IS NULL ORDER BY s.name", (str(workspace_uuid),))
+            return [dict(row) for row in cur.fetchall()]
 
-    def get_ingestion_run(self, run_id: str) -> dict | None:
-        with psycopg2.connect(self._dsn) as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    """
-                    SELECT run_id, source_id, status, started_at, finished_at,
-                           objects_processed, objects_failed, error_message, trace_id
-                    FROM cce_ingestion_run
-                    WHERE run_id = %s
-                    """,
-                    (run_id,),
-                )
-                row = cur.fetchone()
-        return dict(row) if row else None
+    def update(self, workspace_uuid, source_id, values):
+        allowed={'name','credential_ref','config','enabled'}
+        if not values or set(values)-allowed: raise ValueError('Invalid source update')
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            assignments=','.join(key+'=%s' for key in values)
+            params=[json_param(value) if key=='config' else value for key,value in values.items()]
+            cur.execute('UPDATE cce_source SET '+assignments+',updated_at=now() WHERE workspace_uuid=%s AND source_id=%s AND archived_at IS NULL RETURNING source_id', (*params,str(workspace_uuid),str(source_id)))
+            if not cur.fetchone(): raise KeyError('Workspace source not found')
+        return self.get_source(workspace_uuid,source_id)
+
+    def archive(self, workspace_uuid, source_id):
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            cur.execute('UPDATE cce_source SET archived_at=coalesce(archived_at,now()),enabled=false,updated_at=now() WHERE workspace_uuid=%s AND source_id=%s RETURNING source_id',(str(workspace_uuid),str(source_id)))
+            if not cur.fetchone(): raise KeyError('Workspace source not found')
+        return self.get_source(workspace_uuid,source_id)
+
+    def get_ingestion_run(self, workspace_uuid, run_id):
+        with self.db.transaction() as cur:
+            self.require_workspace(workspace_uuid,cur)
+            cur.execute('SELECT r.* FROM cce_ingestion_run r JOIN cce_source s USING(source_id) WHERE s.workspace_uuid=%s AND r.run_id=%s',(str(workspace_uuid),str(run_id)))
+            row=cur.fetchone()
+            if not row: raise KeyError('Workspace ingestion run not found')
+            return dict(row)

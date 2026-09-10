@@ -1,4 +1,4 @@
-"""Stable CCE domain exceptions."""
+"""Stable CCE workspace exceptions."""
 
 
 class CCEError(Exception):

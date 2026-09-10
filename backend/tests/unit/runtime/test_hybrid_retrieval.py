@@ -7,15 +7,15 @@ from cce.runtime.orchestrator import RuntimeOrchestrator, BranchWork
 
 
 def setup_case(graph_fails=False):
-    domain, source = uuid4(), uuid4()
+    workspace, source = uuid4(), uuid4()
     hit = {'memory_id': 'source-memory', 'score': .9, 'chunk_text': 'The documented deadline is 48 hours.',
-           'metadata': {'source_id': str(source), 'domain_id': str(domain)}}
+           'metadata': {'source_id': str(source), 'workspace_uuid': str(workspace)}}
 
     class Index:
         graph_calls = 0
 
         def search(self, *args, **kwargs):
-            assert kwargs['metadata_filter']['domain_id'] == str(domain)
+            assert kwargs['metadata_filter']['workspace_uuid'] == str(workspace)
             return [hit]
 
         def graph(self, *args, **kwargs):
@@ -24,15 +24,15 @@ def setup_case(graph_fails=False):
                 raise RuntimeError('graph unavailable')
             return {'entities': [
                 {'entity_id': 'safe', 'name': 'Deadline', 'source_memories': ['source-memory']},
-                {'entity_id': 'mixed', 'name': 'Mixed domain', 'source_memories': ['source-memory', 'other-domain']},
+                {'entity_id': 'mixed', 'name': 'Mixed workspace', 'source_memories': ['source-memory', 'other-workspace']},
             ], 'relationships': [{'source_entity_id': 'safe', 'target_entity_id': 'mixed', 'relation_type': 'RELATED'}]}
 
     schema = SourceSchema(source_id=source, tables=[TableSchema(database='DB', schema_name='PUBLIC', name='ITEMS', columns=[ColumnSchema(name='ID', data_type='TEXT')])])
-    traces = SimpleNamespace(domain_source_ids=lambda d: [str(source)], node=lambda *a: None,
-                             domain_schemas=lambda d: [schema])
+    traces = SimpleNamespace(workspace_source_ids=lambda d: [str(source)], node=lambda *a: None,
+                             workspace_schemas=lambda d: [schema])
     index = Index()
     runtime = RuntimeOrchestrator(Settings(), None, None, None, traces, index, None)
-    work = BranchWork(question='What is the reporting deadline?', trace_id=uuid4(), domain_id=domain,
+    work = BranchWork(question='What is the reporting deadline?', trace_id=uuid4(), workspace_uuid=workspace,
                       intent=QueryIntent(intent='policy', needs_live_data=False), branch='ON')
     return runtime, work, index
 

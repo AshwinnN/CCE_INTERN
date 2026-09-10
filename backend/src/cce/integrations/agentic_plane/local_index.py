@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from cce.integrations.agentic_plane.rendering import render_markdown
 import hashlib
 import os
 import uuid
@@ -21,8 +22,11 @@ class LocalIndexClient:
         self,
         dsn: str,
         *,
+        chunk_target_tokens: int = 1000,
+        chunk_overlap_tokens: int = 125,
         embed_texts: Callable[[list[str]], list[list[float]]] | None = None,
     ):
+        self._chunk_options = dict(target_tokens=chunk_target_tokens, overlap_tokens=chunk_overlap_tokens)
         self._dsn = dsn
         self._embed_texts = embed_texts
 
@@ -30,10 +34,12 @@ class LocalIndexClient:
         if payload.get("change_type") == "deleted":
             return self.delete(payload["document_id"])
 
-        chunks = list(_payload_chunks(payload))
+        chunks = list(_payload_chunks(payload, **self._chunk_options))
         if not chunks:
             return {"status": "indexed", "indexed": 0}
 
+        for chunk in chunks:
+            chunk["chunk_text"] = render_markdown(chunk["chunk_text"], chunk["metadata"])
         embeddings = self._embed([chunk["chunk_text"] for chunk in chunks])
         source_uuid = _source_uuid(payload["source_id"])
         with psycopg2.connect(self._dsn) as conn:
@@ -45,9 +51,12 @@ class LocalIndexClient:
                             chunk_id, document_id, source_id, chunk_text, embedding,
                             source_ref, version, object_id, trace_id, metadata
                         ) VALUES (%s, %s, %s, %s, %s::vector, %s, %s, %s, %s, %s)
+                        ON CONFLICT (chunk_id) DO UPDATE SET
+                            chunk_text=EXCLUDED.chunk_text, embedding=EXCLUDED.embedding,
+                            metadata=EXCLUDED.metadata
                         """,
                         (
-                            str(uuid.uuid4()),
+                            chunk["metadata"]["chunk_id"],
                             payload["document_id"],
                             source_uuid,
                             chunk["chunk_text"],

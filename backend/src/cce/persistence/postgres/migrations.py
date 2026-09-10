@@ -28,6 +28,7 @@ MIGRATION_FILES = (
     "011_agentic_plane_refs.sql",
     "012_domain_governance_lifecycle.sql",
     "013_runtime_and_jobs.sql",
+    "014_workspace_scope.sql",
 )
 LOCAL_INDEX_MIGRATION_FILES = {
     "008_local_index.sql",
@@ -75,12 +76,18 @@ def apply_control_schema(dsn: str, index_backend: str = "local") -> None:
     with psycopg2.connect(dsn) as conn:
         conn.autocommit = False
         with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(77442014)")
+            cur.execute("CREATE TABLE IF NOT EXISTS cce_schema_migration(name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
             for path in migration_paths(index_backend):
+                cur.execute("SELECT 1 FROM cce_schema_migration WHERE name=%s", (path.name,))
+                if cur.fetchone():
+                    continue
                 sql = path.read_text(encoding="utf-8")
                 if not sql.strip():
                     continue
                 try:
                     cur.execute(sql)
+                    cur.execute("INSERT INTO cce_schema_migration(name) VALUES(%s)", (path.name,))
                 except psycopg2.Error as exc:
                     if path.name == "008_local_index.sql":
                         raise RuntimeError(

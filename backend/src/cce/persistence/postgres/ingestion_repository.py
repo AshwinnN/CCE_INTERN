@@ -25,10 +25,12 @@ class IngestionRepository:
             if not cur.fetchone():
                 raise KeyError("Source not found")
             cur.execute(
-                "SELECT r.run_id,r.status FROM cce_ingestion_run r WHERE r.source_id=%s AND (r.status IN ('RUNNING','PARTIAL') OR (r.status='COMPLETE' AND EXISTS(SELECT 1 FROM cce_job j WHERE j.ingestion_run_id=r.run_id AND j.status='FAILED'))) ORDER BY r.started_at LIMIT 1",
+                "SELECT r.run_id,r.status FROM cce_ingestion_run r WHERE r.source_id=%s AND (r.status IN ('RUNNING','PARTIAL') OR (r.status='SUCCESS' AND EXISTS(SELECT 1 FROM cce_job j WHERE j.ingestion_run_id=r.run_id AND j.status='FAILED'))) ORDER BY r.started_at LIMIT 1",
                 (str(source_id),),
             )
             row = cur.fetchone()
+            if row and row['status'] == 'RUNNING':
+                raise ValueError('Source ingestion is already RUNNING')
             rid = row["run_id"] if row else uuid4()
             if not row:
                 cur.execute(
@@ -165,17 +167,16 @@ class IngestionRepository:
         with self.db.transaction() as cur:
             self.assert_lease(cur, request)
             cur.execute(
-                """INSERT INTO ingestion_item_result(ingestion_run_id,source_item_id,change_type,processing_status,content_hash,detected_domains,error)
-                VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(ingestion_run_id,source_item_id) DO UPDATE SET
+                """INSERT INTO ingestion_item_result(ingestion_run_id,source_item_id,change_type,processing_status,content_hash,error)
+                VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(ingestion_run_id,source_item_id) DO UPDATE SET
                 change_type=excluded.change_type,processing_status=excluded.processing_status,content_hash=excluded.content_hash,
-                detected_domains=excluded.detected_domains,error=excluded.error,updated_at=now()""",
+                error=excluded.error,updated_at=now()""",
                 (
                     str(request.ingestion_run_id),
                     str(i.source_item_id),
                     i.change_type,
                     result.status,
                     i.content_hash,
-                    json_param([d.model_dump(mode="json") for d in result.domains]),
                     result.error,
                 ),
             )
@@ -186,12 +187,12 @@ class IngestionRepository:
                 )
                 for c in candidates:
                     cur.execute(
-                        "INSERT INTO candidate_extraction(candidate_id,ingestion_run_id,source_item_id,domain_id,asset_type,canonical_key,payload) VALUES(%s,%s,%s,%s,%s,%s,%s)",
+                        "INSERT INTO candidate_extraction(candidate_id,ingestion_run_id,source_item_id,workspace_uuid,asset_type,canonical_key,payload) VALUES(%s,%s,%s,%s,%s,%s,%s)",
                         (
                             str(uuid4()),
                             str(request.ingestion_run_id),
                             str(i.source_item_id),
-                            str(c.domain_id),
+                            str(c.workspace_uuid),
                             c.payload.asset_type,
                             c.payload.canonical_key,
                             json_param(c),
@@ -207,25 +208,6 @@ class IngestionRepository:
                     ),
                 )
 
-    def detections(self, request, item, candidates, selected):
-        with self.db.transaction() as cur:
-            self.assert_lease(cur, request)
-            for d in candidates:
-                cur.execute(
-                    """INSERT INTO source_domain_detection(detection_id,ingestion_run_id,source_id,source_item_id,domain_id,confidence,rationale,selected)
-                    VALUES(%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (
-                        str(uuid4()),
-                        str(request.ingestion_run_id),
-                        str(item.source_id),
-                        str(item.source_item_id),
-                        str(d.domain_id),
-                        d.confidence,
-                        d.rationale,
-                        d.domain_id in selected,
-                    ),
-                )
-
     def finish(self, request, results: list[ItemResult]) -> IngestionRun:
         failures = [r for r in results if r.status != "SUCCESS"]
         with self.db.transaction() as cur:
@@ -233,47 +215,31 @@ class IngestionRepository:
             cur.execute(
                 "UPDATE cce_ingestion_run SET status=%s,objects_processed=%s,objects_failed=%s,error_message=%s,finished_at=now() WHERE run_id=%s",
                 (
-                    "PARTIAL" if failures else "COMPLETE",
+                    "PARTIAL" if failures else "SUCCESS",
                     len(results) - len(failures),
                     len(failures),
                     "; ".join(r.error or str(r.status) for r in failures) or None,
                     str(request.ingestion_run_id),
                 ),
             )
-            if not failures:
-                cur.execute(
-                    "DELETE FROM source_domain WHERE source_id=%s",
-                    (str(request.source_id),),
-                )
-                # Latest detection per available item/domain, retaining unchanged successful history.
-                cur.execute(
-                    """INSERT INTO source_domain(source_id,domain_id,confidence,ingestion_run_id,rationale)
-                    SELECT %s,domain_id,max(confidence),%s,string_agg(DISTINCT rationale,'; ') FROM (
-                    SELECT DISTINCT ON(d.source_item_id,d.domain_id) d.domain_id,d.confidence,d.rationale,d.selected
-                    FROM source_domain_detection d JOIN source_item i USING(source_item_id)
-                    WHERE d.source_id=%s AND i.availability_status='AVAILABLE' AND d.created_at=(SELECT max(d2.created_at) FROM source_domain_detection d2 WHERE d2.source_item_id=d.source_item_id)
-                    ORDER BY d.source_item_id,d.domain_id,d.created_at DESC) latest WHERE selected GROUP BY domain_id""",
-                    (
-                        str(request.source_id),
-                        str(request.ingestion_run_id),
-                        str(request.source_id),
-                    ),
-                )
         return self.get(request.ingestion_run_id)
 
-    def promotion_domains(self, run_id):
+    def workspace(self, source_id):
         with self.db.transaction() as cur:
-            cur.execute(
-                """SELECT domain_id::text FROM candidate_extraction WHERE ingestion_run_id=%s
-                UNION SELECT domain_id::text FROM source_domain WHERE ingestion_run_id=%s""",
-                (str(run_id), str(run_id)),
-            )
-            return [r["domain_id"] for r in cur.fetchall()]
+            cur.execute("SELECT w.workspace_uuid,w.workspace_id,s.name source_name FROM cce_source s JOIN workspace w USING(workspace_uuid) WHERE s.source_id=%s AND w.status='ACTIVE' AND s.archived_at IS NULL", (str(source_id),))
+            row=cur.fetchone()
+            if not row: raise KeyError('Active workspace source not found')
+            return dict(row)
+
+    def promotion_workspaces(self, run_id):
+        with self.db.transaction() as cur:
+            cur.execute("SELECT s.workspace_uuid FROM cce_ingestion_run r JOIN cce_source s USING(source_id) WHERE r.run_id=%s", (str(run_id),))
+            return [row['workspace_uuid'] for row in cur.fetchall()]
 
     def missing_candidates(self, item) -> list[Candidate]:
         with self.db.transaction() as cur:
             cur.execute(
-                """SELECT DISTINCT a.asset_id,a.domain_id,r.payload FROM context_asset a
+                """SELECT DISTINCT a.asset_id,a.workspace_uuid,r.payload FROM context_asset a
                 JOIN context_asset_revision r USING(asset_id) JOIN package_asset pa USING(asset_revision_id)
                 JOIN package_version v USING(package_version_id) JOIN asset_revision_evidence ae USING(asset_revision_id)
                 JOIN context_evidence e USING(evidence_id) WHERE v.status='ACTIVE' AND e.source_item_id=%s
@@ -291,7 +257,7 @@ class IngestionRepository:
                 evidence = [Evidence.model_validate(dict(r)) for r in cur.fetchall()]
                 out.append(
                     Candidate(
-                        domain_id=row["domain_id"],
+                        workspace_uuid=row["workspace_uuid"],
                         payload=row["payload"],
                         evidence=evidence,
                         operation="REMOVE",

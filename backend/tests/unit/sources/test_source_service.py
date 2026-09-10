@@ -1,157 +1,176 @@
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from cce.ingestion.lifecycle_models import IngestionRunStatus
 from cce.sources.service import SourceService
 
+WORKSPACE = uuid4()
 
-class InMemoryRepo:
+
+class InMemorySourceRepo:
     def __init__(self):
         self.sources = {}
-        self.runs = {}
 
-    def save_source(self, adapter, source_id, credential_ref, kind, config, enabled):
-        saved_id = "00000000-0000-0000-0000-000000000001"
-        self.sources[saved_id] = {
-            "source_id": saved_id,
-            "adapter": adapter,
-            "account_id": source_id,
+    def save_source(self, workspace_uuid, name, source_type, credential_ref, kind, config):
+        source_id = str(uuid4())
+        self.sources[source_id] = {
+            "source_id": source_id,
+            "workspace_uuid": workspace_uuid,
+            "name": name,
+            "source_type": source_type,
             "credential_ref": credential_ref,
             "kind": kind,
             "config": config,
-            "enabled": enabled,
+            "enabled": True,
+            "archived_at": None,
         }
-        self.sources[source_id] = self.sources[saved_id]
-        return saved_id
+        return self.sources[source_id]
 
-    def get_source(self, source_id):
-        return self.sources.get(source_id)
+    def list_sources(self, workspace_uuid):
+        return [s for s in self.sources.values() if s["workspace_uuid"] == workspace_uuid]
 
-    def list_sources(self):
-        unique_sources = {
-            source["source_id"]: source for source in self.sources.values()
-        }
-        return list(unique_sources.values())
+    def get_source(self, workspace_uuid, source_id):
+        source = self.sources.get(source_id)
+        if not source or source["workspace_uuid"] != workspace_uuid:
+            raise KeyError("Source not found")
+        return source
 
-    def create_ingestion_run(self, source_id, trace_id=None):
-        self.runs["run-1"] = {
-            "run_id": "run-1",
-            "source_id": source_id,
-            "status": "RUNNING",
-            "objects_processed": 0,
-            "objects_failed": 0,
-            "error_message": None,
-            "trace_id": trace_id,
-        }
-        return "run-1"
 
-    def update_ingestion_run(
-        self, run_id, status, objects_processed=0, objects_failed=0, error_message=None
-    ):
-        self.runs[run_id].update(
-            {
-                "status": status,
-                "objects_processed": objects_processed,
-                "objects_failed": objects_failed,
-                "error_message": error_message,
-            }
+class InMemoryIngestionRepo:
+    def __init__(self):
+        self.runs = {}
+
+    def create_or_resume(self, source_id):
+        run = SimpleNamespace(
+            ingestion_run_id=uuid4(),
+            status=IngestionRunStatus.RUNNING,
+            objects_processed=0,
+            objects_failed=0,
+        )
+        self.runs[source_id] = run
+        return run
+
+
+def build_service(source_repository=None, ingestion_repository=None):
+    return SourceService(
+        source_repository=source_repository or InMemorySourceRepo(),
+        metadata_repository=None,
+        checkpoint_store=None,
+        index_client=None,
+        ingestion_repository=ingestion_repository or InMemoryIngestionRepo(),
+    )
+
+
+def test_register_source_validates_config_and_derives_kind():
+    repo = InMemorySourceRepo()
+    service = build_service(source_repository=repo)
+    saved = service.register_source(
+        WORKSPACE,
+        name="Production Blob",
+        source_type="azure_blob",
+        credential_ref="azure-kv://blob",
+        config={"authentication": "connection_string", "container": "documents"},
+    )
+    assert saved["kind"] == "unstructured"
+    assert service.list_sources(WORKSPACE) == [saved]
+
+
+def test_register_source_rejects_missing_name_or_credential():
+    service = build_service()
+    with pytest.raises(ValueError):
+        service.register_source(
+            WORKSPACE,
+            name="",
+            source_type="azure_blob",
+            credential_ref="azure-kv://blob",
+            config={"authentication": "connection_string", "container": "documents"},
+        )
+    with pytest.raises(ValueError):
+        service.register_source(
+            WORKSPACE,
+            name="Production Blob",
+            source_type="azure_blob",
+            credential_ref="",
+            config={"authentication": "connection_string", "container": "documents"},
         )
 
-    def get_ingestion_run(self, run_id):
-        return self.runs.get(run_id)
+
+def test_register_source_rejects_invalid_config():
+    service = build_service()
+    with pytest.raises(Exception):
+        service.register_source(
+            WORKSPACE,
+            name="Production Blob",
+            source_type="azure_blob",
+            credential_ref="azure-kv://blob",
+            config={"authentication": "service_principal", "container": "documents"},
+        )
 
 
-class FakeIndex:
-    def __init__(self):
-        self.payloads = []
-
-    def index(self, payload):
-        self.payloads.append(payload)
-        return {"status": "indexed", "indexed": len(payload.get("blocks", []))}
-
-
-class MemoryCheckpoint:
-    def save(self, source_id, object_id, state):
-        return "checkpoint-1"
-
-
-def test_source_service_local_fs_ingestion_reaches_pipeline(tmp_path):
-    root = tmp_path / "docs"
-    root.mkdir()
-    (root / "hello.txt").write_text("searchable synthetic content", encoding="utf-8")
-    (root / "ignored.txt").write_text("outside the configured limit", encoding="utf-8")
-
-    repo = InMemoryRepo()
-    index = FakeIndex()
-    service = SourceService(
-        source_repository=repo,
-        metadata_repository=None,
-        checkpoint_store=MemoryCheckpoint(),
-        index_client=index,
-        run_async=False,
+def test_test_connection_uses_built_connector(monkeypatch):
+    repo = InMemorySourceRepo()
+    service = build_service(source_repository=repo)
+    saved = service.register_source(
+        WORKSPACE,
+        name="Production Blob",
+        source_type="azure_blob",
+        credential_ref="azure-kv://blob",
+        config={"authentication": "connection_string", "container": "documents"},
     )
-    registered = service.register_source(
-        adapter="local-fs",
-        source_id="docs",
-        credential_ref="",
-        kind="unstructured",
-        config={
-            "root_path": str(root),
-            "max_files": 1,
-            "password": "must-not-leak",
-        },
-    )
-
-    assert service.list_sources() == [
-        {
-            "source_id": registered.source_id,
-            "adapter": "local-fs",
-            "account_id": "docs",
-            "kind": "unstructured",
-            "credential_ref": None,
-            "config": {
-                "root_path": str(root),
-                "max_files": 1,
-                "password": "[REDACTED]",
-            },
-            "enabled": True,
-            "created_at": None,
-            "updated_at": None,
-        }
-    ]
-
-    assert service.test_connection(registered.source_id).status == "CONNECTED"
-    result = service.trigger_ingestion(registered.source_id)
-    assert result.status == "SUCCESS"
-    assert result.objects_processed == 1
-    assert index.payloads[0]["blocks"][0]["text"] == "searchable synthetic content"
-    assert index.payloads[0]["source_ref"].endswith("hello.txt")
+    connected = SimpleNamespace(connect=lambda: None, close=lambda: None)
+    monkeypatch.setattr(service, "_build_connector", lambda source: connected)
+    result = service.test_connection(WORKSPACE, saved["source_id"])
+    assert result == {"source_id": saved["source_id"], "status": "SUCCESS"}
 
 
-def test_connector_build_failure_is_returned_and_persisted(monkeypatch):
-    repo = InMemoryRepo()
-    service = SourceService(
-        source_repository=repo,
-        metadata_repository=None,
-        checkpoint_store=MemoryCheckpoint(),
-        index_client=FakeIndex(),
-        run_async=False,
-    )
-    registered = service.register_source(
-        adapter="azure-blob",
-        source_id="broken-blob",
-        credential_ref="env://missing",
-        kind="unstructured",
-        config={"container": "documents"},
+def test_test_connection_propagates_connector_failure(monkeypatch):
+    repo = InMemorySourceRepo()
+    service = build_service(source_repository=repo)
+    saved = service.register_source(
+        WORKSPACE,
+        name="Production Blob",
+        source_type="azure_blob",
+        credential_ref="azure-kv://blob",
+        config={"authentication": "connection_string", "container": "documents"},
     )
 
     def fail_to_build(_source):
         raise ValueError("invalid Azure Blob configuration")
 
     monkeypatch.setattr(service, "_build_connector", fail_to_build)
+    with pytest.raises(ValueError, match="invalid Azure Blob configuration"):
+        service.test_connection(WORKSPACE, saved["source_id"])
 
-    connection = service.test_connection(registered.source_id)
-    assert connection.status == "FAILED"
-    assert connection.error.code == "CONNECTION_FAILED"
-    assert "invalid Azure Blob configuration" in connection.error.message
 
-    ingestion = service.trigger_ingestion(registered.source_id)
-    assert ingestion.status == "FAILED"
-    assert ingestion.objects_failed == 1
-    assert "invalid Azure Blob configuration" in ingestion.error.message
+def test_disabled_source_blocks_test_and_ingest():
+    repo = InMemorySourceRepo()
+    service = build_service(source_repository=repo)
+    saved = service.register_source(
+        WORKSPACE,
+        name="Production Blob",
+        source_type="azure_blob",
+        credential_ref="azure-kv://blob",
+        config={"authentication": "connection_string", "container": "documents"},
+    )
+    repo.sources[saved["source_id"]]["enabled"] = False
+    with pytest.raises(ValueError):
+        service.test_connection(WORKSPACE, saved["source_id"])
+    with pytest.raises(ValueError):
+        service.trigger_ingestion(WORKSPACE, saved["source_id"])
+
+
+def test_trigger_ingestion_creates_or_resumes_a_run():
+    repo = InMemorySourceRepo()
+    ingestion = InMemoryIngestionRepo()
+    service = build_service(source_repository=repo, ingestion_repository=ingestion)
+    saved = service.register_source(
+        WORKSPACE,
+        name="Production Blob",
+        source_type="azure_blob",
+        credential_ref="azure-kv://blob",
+        config={"authentication": "connection_string", "container": "documents"},
+    )
+    result = service.trigger_ingestion(WORKSPACE, saved["source_id"])
+    assert result.status == "RUNNING"
+    assert saved["source_id"] in ingestion.runs

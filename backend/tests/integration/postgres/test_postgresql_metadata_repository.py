@@ -68,22 +68,20 @@ class EnsureHierarchyTests(unittest.TestCase):
         self.assertIn('SELECT source_id', cur.queries[0][0])
         self.assertEqual(cur.queries[0][1], (registered, 'snowflake'))
 
-    def test_unknown_uuid_account_keeps_legacy_registration(self):
+    def test_unregistered_uuid_raises_key_error(self):
         account = 'c8d602fb-b8c9-55f8-af0c-a9aeafdbb27d'
-        expected = _stable_uuid('source', 'snowflake', account)
-        repo, cur = make_repo([None, {'source_id': expected}])
-        self.assertEqual(repo.ensure_source('snowflake', account), expected)
-        self.assertIn('INSERT INTO cce_source', cur.queries[1][0])
+        repo, cur = make_repo([None])
+        with self.assertRaises(KeyError):
+            repo.ensure_source('snowflake', account)
 
-    def test_ensure_source_returns_deterministic_id_and_upserts(self):
-        expected_id = _stable_uuid("source", "snowflake", "acct1")
-        repo, cur = make_repo([{"source_id": expected_id}])
-        result = repo.ensure_source("snowflake", "acct1", "Acct One")
-        self.assertEqual(result, expected_id)
-        sql, params = cur.queries[0]
-        self.assertIn("INSERT INTO cce_source", sql)
-        self.assertIn("ON CONFLICT (adapter, account_id)", sql)
-        self.assertEqual(params, (expected_id, "snowflake", "acct1", "Acct One"))
+    def test_non_uuid_account_is_rejected(self):
+        # Anonymous account-name-based source identity was removed with the
+        # Domain-to-Workspace refactor; ensure_source only resolves an
+        # already Workspace-registered source UUID.
+        repo, cur = make_repo([])
+        with self.assertRaises(ValueError):
+            repo.ensure_source("snowflake", "acct1", "Acct One")
+        self.assertEqual(cur.queries, [])
 
     def test_ensure_namespace(self):
         expected_id = _stable_uuid("namespace", "src1", "ANALYTICS_DB")

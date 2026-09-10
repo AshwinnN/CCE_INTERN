@@ -1,4 +1,4 @@
-"""Global to domain to region to account override placeholder."""
+"""Global to workspace to region to account override placeholder."""
 
 
 def resolve_overrides(*layers):

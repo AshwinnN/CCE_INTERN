@@ -16,6 +16,40 @@ from cce.connectors.structured.snowflake.connector import SnowflakeConnector
 
 
 class ConnectorFactory:
+    @staticmethod
+    def create_source(source_type, config, credential_ref, source_id, *, draft=False):
+        """Build from the production catalog without resolving secrets during validation."""
+        from cce.sources.catalog import source_type_definition
+        definition = source_type_definition(source_type)
+        parsed = definition.validate_config(config, draft=draft)
+        if not credential_ref or not credential_ref.strip():
+            raise ValueError("credential_ref is required")
+        if source_type in {"postgresql", "sql_server", "mysql"}:
+            from cce.connectors.structured.relational import RelationalConnector
+            return RelationalConnector(source_type, parsed, credential_ref)
+        if source_type == "snowflake":
+            selection = parsed.schema_selection
+            return SnowflakeConnector(ConnectionConfig(adapter="snowflake", account_id=parsed.account_id,
+                user=parsed.user, credential_ref=credential_ref, database=parsed.database,
+                schema=selection.schemas[0] if selection and selection.schemas else "",
+                role=parsed.role, warehouse=parsed.warehouse, max_rows=parsed.max_rows,
+                login_timeout_s=parsed.login_timeout_s, network_timeout_s=parsed.network_timeout_s,
+                authentication=parsed.authentication, write_probe_enabled=True))
+        if source_type == "google_drive":
+            from cce.connectors.unstructured.google_drive.connector import GoogleDriveConnector
+            return GoogleDriveConnector(parsed, credential_ref, source_id)
+        from cce.connectors.unstructured.azure_blob.connector import AzureBlobSource
+        from cce.security.credentials import load_credential
+        secret = load_credential(credential_ref)
+        if parsed.authentication == "connection_string":
+            return AzureBlobSource(secret, parsed.container, source_id, prefix=parsed.prefix, recursive=parsed.recursive)
+        from azure.identity import ClientSecretCredential
+        from azure.storage.blob import BlobServiceClient
+        credential = ClientSecretCredential(parsed.tenant_id, parsed.client_id, secret)
+        client = BlobServiceClient(parsed.account_url, credential=credential)
+        return AzureBlobSource("", parsed.container, source_id, service_client=client,
+                               prefix=parsed.prefix, recursive=parsed.recursive, credential=credential)
+
     _connectors = {
         "snowflake": SnowflakeConnector,
         # "postgres": PostgresConnector,   # Phase 2
