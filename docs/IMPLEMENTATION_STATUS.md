@@ -2,6 +2,19 @@
 
 This document describes the actual backend implementation, not a hosted production acceptance claim.
 
+Saved pre-catalog Snowflake sources are normalized at the source-service boundary:
+legacy `schema` becomes a single selected schema and missing authentication uses
+the old connector's `key_pair` default. Explicit authentication is preserved;
+conflicting old/new schema selections are rejected. This applies to runtime SQL
+in both Context ON/OFF and source ingestion/connection checks, without rewriting
+stored records or relaxing new-source registration validation.
+
+The catalog-based Snowflake connector currently disables the temporary-table
+write probe. Snowflake allows temporary-table creation without `CREATE TABLE`
+privilege, so it is not a valid read-only-role check. Runtime SELECT-only SQL
+guards, timeouts and row limits remain enabled; connection metadata reports
+`read_only_verified=False` when this probe is disabled.
+
 ## Implemented
 
 - Existing Snowflake, Azure Blob and local filesystem integration paths, parsers, normalizers and structured metadata persistence are retained; PostgreSQL, SQL Server, MySQL and Google Drive connectors were added (see the dated updates below).

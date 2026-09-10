@@ -4,7 +4,7 @@ from typing import Annotated, TypedDict
 from uuid import uuid4
 from langgraph.graph import START, END, StateGraph
 from langgraph.types import Send
-from cce.runtime.models import AtomicQuestions, AnswerResult, QueryRequest, QueryResponse, WorkspaceInfo
+from cce.runtime.models import AtomicQuestions, AnswerResult, QueryRequest, QueryResponse, WorkspaceInfo, SynthesisRequest, SynthesisAnswer
 
 
 class NoActivePackage(ValueError):
@@ -73,7 +73,7 @@ class CompoundQuery:
         failed=[r.question for r in results if r not in successful]
         status='SUCCESS' if not failed else ('PARTIAL' if successful else 'FAILED')
         if successful:
-            inputs={'original_question':state['request'].question,'successful_on_answers':[{'question':r.question,'answer':r.context_on.answer,'citations':[c.model_dump(mode='json') for c in r.context_on.citations]} for r in successful]}
+            inputs=SynthesisRequest(original_question=state['request'].question,successful_on_answers=[SynthesisAnswer(question=r.question,answer=r.context_on.answer,citations=r.context_on.citations) for r in successful])
             answer=self.runtime._call(state['trace_id'],'synthesis','Synthesize only the supplied successful governed answers. Preserve conditions and uncertainty; do not invent facts. Citation labels and coordinates are externally supplied.',inputs,AnswerResult).answer
         else: answer='No atomic question could be answered successfully.'
         if failed: answer+='\n\nUnable to answer: '+'; '.join(failed)

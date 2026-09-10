@@ -2,6 +2,21 @@
 
 ## Implemented behavior
 
+The Snowflake saved-config compatibility path converts legacy `schema` to
+`schema_selection` and supplies the historical key-pair authentication default.
+The production catalog factory disables the temporary-table write probe while
+retaining `read_only_verified=False`; guarded SELECT queries remain executable.
+Live verification against the configured Snowflake source returned 3,000 rows
+for `COUNT(*)` on `ERP_COS_APPAREL.ITEM_VARIANTS`. Compound-query final synthesis
+now uses a typed `SynthesisRequest`, matching the shared LLM client contract.
+The full live question "How large is the companys product matrix?" completed
+successfully in both Context ON and Context OFF, each returning 3,000 item
+variants, with successful final synthesis. Audit trace:
+`663eff9e-715c-43d9-b213-9e677b32d464` (2026-09-10). No migrations or ingestion
+workers were run for this verification. Local regression tests were added but
+were not used as acceptance evidence; verification used the live configured
+Azure PostgreSQL, Snowflake and LLM services.
+
 Real backend services now connect durable source ingestion to staged extraction, steward review, full Workspace context-package snapshots, package-filtered evidence retrieval, parallel Context ON/OFF answering, guarded SQL with repair, and durable traces. The `frontend/` UI is the real Workspace-scoped production frontend, not a mock; the earlier `backend/api/` development mock has been removed.
 
 The final decision in a batch triggers deterministic validation and atomic activation. Partial ingestion cannot expose proposals. Rejected, no-change and structurally blocked batches do not increment versions. Approved removals retire assets only after successful package creation and preserve historical versions.

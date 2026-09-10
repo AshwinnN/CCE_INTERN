@@ -9,6 +9,24 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def normalize_stored_config(source_type: str, value: dict) -> dict:
+    """Adapt persisted pre-catalog Snowflake configs without relaxing registration.
+
+    The old connector supported key-pair authentication and one `schema`.
+    Only that legacy shape implies an authentication default; malformed modern
+    configs must still fail validation. Never mutate the repository's value.
+    """
+    config = dict(value)
+    if source_type == "snowflake" and "schema" in config:
+        schema = config.pop("schema")
+        selection = {"mode": "selected", "schemas": [schema]}
+        if "schema_selection" in config and config["schema_selection"] != selection:
+            raise ValueError("Conflicting legacy schema and schema_selection in saved Snowflake source")
+        config["schema_selection"] = selection
+        config.setdefault("authentication", "key_pair")
+    return config
+
+
 class SchemaSelection(Config):
     mode: Literal["all", "selected"]
     schemas: list[str] = Field(default_factory=list)

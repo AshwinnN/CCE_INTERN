@@ -60,9 +60,15 @@ class SourceService:
     def _require_source(self, source_id):
         source=self.source_repository.get_internal_source(source_id)
         self._enabled(source)
-        return source
+        return self._normalize_source(source)
+
+    @staticmethod
+    def _normalize_source(source):
+        from cce.sources.catalog import normalize_stored_config
+        return {**source, 'config': normalize_stored_config(source['source_type'], source['config'])}
 
     def _build_connector(self, source):
+        source = self._normalize_source(source)
         if source['source_type']=='local-fs':
             return ConnectorFactory.create_unstructured('local-fs',root_path=source['config']['root_path'],source_id=str(source['source_id']))
         return ConnectorFactory.create_source(source['source_type'],source['config'],source['credential_ref'],str(source['source_id']))

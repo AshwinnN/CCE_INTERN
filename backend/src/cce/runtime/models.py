@@ -269,6 +269,17 @@ class AtomicQuestions(Model):
     questions: list[str] = Field(min_length=1, max_length=10)
 
 
+class SynthesisAnswer(Model):
+    question: str
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class SynthesisRequest(Model):
+    original_question: str
+    successful_on_answers: list[SynthesisAnswer]
+
+
 class QueryResponse(Model):
     trace_id: UUID
     status: Literal['SUCCESS','PARTIAL','FAILED']

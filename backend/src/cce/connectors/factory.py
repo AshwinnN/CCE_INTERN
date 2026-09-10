@@ -29,12 +29,14 @@ class ConnectorFactory:
             return RelationalConnector(source_type, parsed, credential_ref)
         if source_type == "snowflake":
             selection = parsed.schema_selection
+            # Temporary-table creation is not proof of write access in Snowflake.
+            # Keep the connection unverified; guarded SELECT execution is allowed.
             return SnowflakeConnector(ConnectionConfig(adapter="snowflake", account_id=parsed.account_id,
                 user=parsed.user, credential_ref=credential_ref, database=parsed.database,
                 schema=selection.schemas[0] if selection and selection.schemas else "",
                 role=parsed.role, warehouse=parsed.warehouse, max_rows=parsed.max_rows,
                 login_timeout_s=parsed.login_timeout_s, network_timeout_s=parsed.network_timeout_s,
-                authentication=parsed.authentication, write_probe_enabled=True))
+                authentication=parsed.authentication, write_probe_enabled=False))
         if source_type == "google_drive":
             from cce.connectors.unstructured.google_drive.connector import GoogleDriveConnector
             return GoogleDriveConnector(parsed, credential_ref, source_id)
