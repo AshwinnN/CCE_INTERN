@@ -7,25 +7,25 @@ class ContextRepository:
     def __init__(self, db):
         self.db = db
 
-    def active(self, workspace_uuid: UUID, cur=None) -> PackageSnapshot | None:
+    def active(self, domain_id: UUID, cur=None) -> PackageSnapshot | None:
         if cur is None:
             with self.db.transaction() as cursor:
-                return self.active(workspace_uuid, cursor)
+                return self.active(domain_id, cursor)
         cur.execute(
-            """SELECT p.package_id,p.workspace_uuid,v.package_version_id,v.version_no,v.status
+            """SELECT p.package_id,p.domain_id,v.package_version_id,v.version_no,v.status
             FROM context_package p JOIN package_version v USING(package_id)
-            WHERE p.workspace_uuid=%s AND v.status='ACTIVE'""", (str(workspace_uuid),))
+            WHERE p.domain_id=%s AND v.status='ACTIVE'""", (str(domain_id),))
         row=cur.fetchone()
         return self._manifest(cur,row) if row else None
 
     def _manifest(self,cur,row):
         # Relational manifest and immutable revisions are authoritative; JSON is derived.
-        cur.execute("""SELECT a.asset_id,r.asset_revision_id,a.workspace_uuid,r.revision_no,r.payload,p.resolved_by approved_by
+        cur.execute("""SELECT a.asset_id,r.asset_revision_id,a.domain_id,r.revision_no,r.payload,p.resolved_by approved_by
             FROM package_asset pa JOIN context_asset_revision r USING(asset_revision_id)
             JOIN context_asset a USING(asset_id) JOIN proposal p ON p.proposal_id=r.created_from_proposal_id
             WHERE pa.package_version_id=%s ORDER BY a.asset_type,a.canonical_key""", (str(row['package_version_id']),))
         assets=[GovernedAsset.model_validate(dict(record)) for record in cur.fetchall()]
-        package=PackageSnapshot(package_id=row['package_id'],workspace_uuid=row['workspace_uuid'],package_version_id=row['package_version_id'],
+        package=PackageSnapshot(package_id=row['package_id'],domain_id=row['domain_id'],package_version_id=row['package_version_id'],
             version=row['version_no'],status=row['status'],assets=assets)
         return self._hydrate(package,cur)
 
@@ -51,30 +51,31 @@ class ContextRepository:
             }
         )
 
-    def get_package(self, workspace_uuid):
+    def list_packages(self):
         with self.db.transaction() as cur:
-            cur.execute("SELECT p.package_id,p.workspace_uuid,p.name,(SELECT version_no FROM package_version v WHERE v.package_id=p.package_id AND status='ACTIVE') active_version FROM context_package p WHERE workspace_uuid=%s",(str(workspace_uuid),))
-            row=cur.fetchone()
-            if not row: raise KeyError('Workspace package not found')
+            cur.execute(
+                "SELECT package_id::text,domain_id::text,name FROM context_package ORDER BY name"
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+    def get_package(self, package_id):
+        with self.db.transaction() as cur:
+            cur.execute(
+                "SELECT package_id::text,domain_id::text,name FROM context_package WHERE package_id=%s",
+                (str(package_id),),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise KeyError("Package not found")
             return dict(row)
 
-    def rename(self, workspace_uuid, name):
-        if not name.strip(): raise ValueError('Package name is required')
+    def version(self, package_id, version) -> PackageSnapshot:
         with self.db.transaction() as cur:
-            cur.execute('UPDATE context_package SET name=%s WHERE workspace_uuid=%s RETURNING package_id',(name,str(workspace_uuid)))
-            if not cur.fetchone(): raise KeyError('Workspace package not found')
-        return self.get_package(workspace_uuid)
-
-    def versions(self, workspace_uuid):
-        with self.db.transaction() as cur:
-            cur.execute('SELECT v.version_no version,v.status,v.created_at FROM package_version v JOIN context_package p USING(package_id) WHERE p.workspace_uuid=%s ORDER BY v.version_no DESC',(str(workspace_uuid),))
-            return [dict(row) for row in cur.fetchall()]
-
-    def version(self, workspace_uuid, version):
-        with self.db.transaction() as cur:
-            cur.execute("SELECT p.package_id,p.workspace_uuid,v.package_version_id,v.version_no,v.status FROM context_package p JOIN package_version v USING(package_id) WHERE p.workspace_uuid=%s AND v.version_no=%s",(str(workspace_uuid),int(version)))
+            cur.execute("""SELECT p.package_id,p.domain_id,v.package_version_id,v.version_no,v.status
+                FROM context_package p JOIN package_version v USING(package_id)
+                WHERE p.package_id=%s AND v.version_no=%s""",(str(package_id),int(str(version).lstrip('v'))))
             row=cur.fetchone()
-            if not row: raise KeyError('Workspace package version not found')
+            if not row:raise KeyError('Package version not found')
             return self._manifest(cur,row)
 
     def linked_assets(

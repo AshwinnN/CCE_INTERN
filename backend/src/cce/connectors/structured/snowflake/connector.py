@@ -28,7 +28,7 @@ from cce.connectors.base.exceptions import (
     WriteAccessDetectedError,
 )
 from cce.connectors.base.models import ConnectionConfig
-from cce.security.credentials import load_snowflake_keypair_credential, load_credential
+from cce.security.credentials import load_snowflake_keypair_credential
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +79,14 @@ class SnowflakeConnector(StructuredConnector):
             self.config.warehouse,
         )
         try:
-            if self.config.authentication == "password":
-                auth = {"password": load_credential(self.config.credential_ref)}
-            elif self.config.authentication == "key_pair":
-                credential = load_snowflake_keypair_credential(self.config.credential_ref)
-                auth = {"private_key": _private_key_der(credential["private_key_pem"], credential["passphrase"])}
-            else:
-                raise ValueError("Unsupported Snowflake authentication")
+            credential = load_snowflake_keypair_credential(self.config.credential_ref)
+            private_key = _private_key_der(
+                credential["private_key_pem"], credential["passphrase"]
+            )
             self._connection = self._driver_connect(
                 account=self.config.account_id,
                 user=self.config.user,
-                **auth,
+                private_key=private_key,
                 role=self.config.role,
                 warehouse=self.config.warehouse,
                 database=self.config.database,
@@ -140,16 +137,6 @@ class SnowflakeConnector(StructuredConnector):
             connection_id,
             read_only_verified=self.config.write_probe_enabled,
         )
-
-    def list_schemas(self) -> list[str]:
-        if self._connection is None:
-            raise NotConnectedError("Snowflake is not connected")
-        cursor = self._connection.cursor()
-        try:
-            cursor.execute(f"SELECT SCHEMA_NAME FROM {_quote_identifier(self.config.database)}.INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME <> 'INFORMATION_SCHEMA'")
-            return sorted(str(row[0]) for row in cursor.fetchall())
-        finally:
-            cursor.close()
 
     def _run_write_probe(self) -> bool:
         """Attempts CREATE TEMPORARY TABLE. Returns True if the write

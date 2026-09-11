@@ -5,6 +5,7 @@ from cce.context_packages.models.assets import Evidence, Glossary
 from cce.governance.models import Candidate, ExtractionResult, ProposalFilter
 from cce.ingestion.lifecycle_models import GroundedItem, SourceItem
 from cce.ingestion.source_graph import SourceGraph
+from cce.runtime.models import DomainCandidate, DomainCandidates
 from test_lifecycle import setup_source
 
 
@@ -67,16 +68,26 @@ class Index:
 
 
 class LLM:
-    def __init__(self, workspace):
-        self.workspace = workspace
+    def __init__(self, domain):
+        self.domain = domain
 
     def invoke(self, task, instruction, request, output):
+        if output is DomainCandidates:
+            return DomainCandidates(
+                candidates=[
+                    DomainCandidate(
+                        domain_id=self.domain.domain_id,
+                        confidence=0.9,
+                        rationale="Supported",
+                    )
+                ]
+            )
         item = request.source_item
         hit = request.evidence[0]
         return ExtractionResult(
             candidates=[
                 Candidate(
-                    workspace_uuid=self.workspace.workspace_uuid,
+                    domain_id=self.domain.domain_id,
                     payload=Glossary(
                         canonical_key="term", term="Term", definition="Definition"
                     ),
@@ -98,40 +109,40 @@ class LLM:
 
 def test_source_fanout_partial_resume_changed_again_and_promotion(system):
     s = system
-    workspace, source = setup_source(s)
+    domain, source = setup_source(s)
     ground = Grounding(source)
     index = Index()
     graph = SourceGraph(
         Settings(),
         s.ingestion,
-        s.workspaces,
+        s.domains,
         s.context,
         s.governance,
         ground,
         index,
-        LLM(workspace),
+        LLM(domain),
     )
     run = s.ingestion.create_or_resume(source)
     job = s.jobs.claim()
     assert graph.run(job).status == "PARTIAL"
     s.jobs.finish(job)
-    assert not s.governance.list(ProposalFilter(workspace_uuid=s.workspace_uuid))
+    assert not s.governance.list(ProposalFilter())
     ground.fail = False
     ground.hashes[0] = "b"
     resumed = s.ingestion.create_or_resume(source)
     assert resumed.ingestion_run_id == run.ingestion_run_id
     job = s.jobs.claim()
-    assert graph.run(job).status == "SUCCESS"
+    assert graph.run(job).status == "COMPLETE"
     s.jobs.finish(job)
     assert ground.processed.count("0") == 2  # successful but changed again -> reprocess
-    assert len(s.governance.list(ProposalFilter(workspace_uuid=s.workspace_uuid))) == 1
-    assert len(s.governance.list(ProposalFilter(workspace_uuid=s.workspace_uuid))[0].evidence) == 2
+    assert len(s.governance.list(ProposalFilter())) == 1
+    assert len(s.governance.list(ProposalFilter())[0].evidence) == 2
     assert all(
-        p["metadata"]["workspace_uuid"] == str(workspace.workspace_uuid) for p in index.indexed
+        p["metadata"]["domain_id"] == str(domain.domain_id) for p in index.indexed
     )
 
 
-def test_real_local_grounding_redacts_before_workspace_detection(tmp_path):
+def test_real_local_grounding_redacts_before_domain_detection(tmp_path):
     from cce.sources.service import SourceService
     from cce.ingestion.grounding import GroundingAdapter
     from types import SimpleNamespace
@@ -143,9 +154,9 @@ def test_real_local_grounding_redacts_before_workspace_detection(tmp_path):
     )
     service = SourceService(
         source_repository=SimpleNamespace(
-            get_internal_source=lambda _: {
+            get_source=lambda _: {
                 "source_id": str(source),
-                "source_type": "local-fs",
+                "adapter": "local-fs",
                 "kind": "unstructured",
                 "enabled": True,
                 "config": {"root_path": str(tmp_path)},
@@ -154,7 +165,6 @@ def test_real_local_grounding_redacts_before_workspace_detection(tmp_path):
         metadata_repository=None,
         checkpoint_store=None,
         index_client=None,
-        ingestion_repository=None,
     )
     ground = GroundingAdapter(service)
     items = ground.discover(source)

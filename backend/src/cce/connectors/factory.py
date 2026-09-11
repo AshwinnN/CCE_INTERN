@@ -16,6 +16,7 @@ from cce.connectors.structured.snowflake.connector import SnowflakeConnector
 
 
 class ConnectorFactory:
+<<<<<<< HEAD
     @staticmethod
     def create_source(source_type, config, credential_ref, source_id, *, draft=False):
         """Build from the production catalog without resolving secrets during validation."""
@@ -52,6 +53,8 @@ class ConnectorFactory:
         return AzureBlobSource("", parsed.container, source_id, service_client=client,
                                prefix=parsed.prefix, recursive=parsed.recursive, credential=credential)
 
+=======
+>>>>>>> parent of 248e365 (Added a atomic question generation and answer retrieval system to the backend,)
     _connectors = {
         "snowflake": SnowflakeConnector,
         # "postgres": PostgresConnector,   # Phase 2

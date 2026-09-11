@@ -11,7 +11,7 @@ from cce.context_packages.models.assets import (
     GovernedAsset,
     Model,
 )
-from cce.governance.models import Workspace
+from cce.governance.models import Domain
 
 
 class BranchStatus(str, Enum):
@@ -20,6 +20,7 @@ class BranchStatus(str, Enum):
     SKIPPED = "SKIPPED"
     NO_ACTIVE_PACKAGE = "NO_ACTIVE_PACKAGE"
     INSUFFICIENT_CONTEXT = "INSUFFICIENT_CONTEXT"
+    DOMAIN_UNRESOLVED = "DOMAIN_UNRESOLVED"
     DATA_SOURCE_UNRESOLVED = "DATA_SOURCE_UNRESOLVED"
 
 
@@ -35,7 +36,8 @@ class SQLErrorCode(str, Enum):
 class QueryRequest(Model):
     question: str = Field(min_length=1, max_length=16000)
     actor_id: str | None = None
-    workspace_id: str = Field(min_length=1)
+    domain_id: UUID | None = None
+    context_enabled: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -53,10 +55,27 @@ class QueryIntent(Model):
     source_hints: list[str] = Field(default_factory=list)
 
 
-class WorkspaceInfo(Model):
-    workspace_uuid: UUID
-    workspace_id: str
-    name: str
+class DomainCandidate(Model):
+    domain_id: UUID
+    confidence: float = Field(ge=0, le=1)
+    rationale: str
+
+
+class DomainCandidates(Model):
+    candidates: list[DomainCandidate] = Field(default_factory=list)
+
+
+class DomainRoutingRequest(Model):
+    question: str
+    domains: list[Domain]
+
+
+class DomainResolution(Model):
+    domain_id: UUID | None = None
+    name: str | None = None
+    confidence: float | None = None
+    status: BranchStatus = BranchStatus.DOMAIN_UNRESOLVED
+    message: str | None = None
 
 
 class ColumnSchema(Model):
@@ -73,7 +92,6 @@ class TableSchema(Model):
 
 class SourceSchema(Model):
     source_id: UUID
-    source_name: str | None = None
     dialect: str = "snowflake"
     tables: list[TableSchema] = Field(default_factory=list)
 
@@ -180,8 +198,6 @@ class SQLResult(Model):
 
 
 class Citation(Model):
-    coordinates: dict[str, Any] = Field(default_factory=dict)
-    label: str | None = None
     asset_id: UUID | None = None
     asset_revision_id: UUID | None = None
     package_version_id: UUID | None = None
@@ -217,7 +233,6 @@ class QueryBranchResult(Model):
 
 
 class AnswerRequest(Model):
-    feedback: list[dict[str, Any]] = Field(default_factory=list)
     question: str
     schemas: list[SourceSchema] = Field(default_factory=list)
     context: ResolvedContextBundle | None = None
@@ -254,15 +269,16 @@ class PackageResolution(Model):
     status: str = "NO_ACTIVE_PACKAGE"
 
 
-class AtomicQueryResponse(Model):
+class QueryResponse(Model):
     trace_id: UUID
     question: str
-    workspace: WorkspaceInfo
+    domain: DomainResolution
     package: PackageResolution = Field(default_factory=PackageResolution)
     context_on: QueryBranchResult
     context_off: QueryBranchResult
     proof: ProofResult = Field(default_factory=ProofResult)
     errors: list[WorkflowError] = Field(default_factory=list)
+<<<<<<< HEAD
 
 
 class AtomicQuestions(Model):
@@ -290,3 +306,5 @@ class QueryResponse(Model):
     citations: list[Citation] = Field(default_factory=list)
     atomic_results: list[AtomicQueryResponse] = Field(default_factory=list)
     errors: list[WorkflowError] = Field(default_factory=list)
+=======
+>>>>>>> parent of 248e365 (Added a atomic question generation and answer retrieval system to the backend,)

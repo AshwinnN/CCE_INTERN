@@ -1,4 +1,4 @@
-"""Deterministic package materialization. Caller holds the workspace lock/transaction."""
+"""Deterministic package materialization. Caller holds the domain lock/transaction."""
 
 from uuid import uuid4
 
@@ -21,7 +21,7 @@ class PackageBuilder:
 
     def build(self, batch, proposals, cur) -> BuildResult:
         bid = batch["proposal_batch_id"]
-        workspace_uuid = batch["workspace_uuid"]
+        domain_id = batch["domain_id"]
         if any(p.status == "PROPOSED" for p in proposals):
             return BuildResult(proposal_batch_id=bid, status="READY_FOR_REVIEW")
         approved = [p for p in proposals if p.status == "APPROVED"]
@@ -31,7 +31,7 @@ class PackageBuilder:
                 (str(bid),),
             )
             return BuildResult(proposal_batch_id=bid, status="NO_CHANGE")
-        old = self.context.active(workspace_uuid, cur)
+        old = self.context.active(domain_id, cur)
         effective = {str(a.asset_id): a for a in old.assets} if old else {}
         changed = []
         retired = []
@@ -56,9 +56,9 @@ class PackageBuilder:
             revision_no = effective[target].revision_no + 1 if target else 1
             if not target:
                 cur.execute(
-                    "SELECT asset_id::text FROM context_asset WHERE workspace_uuid=%s AND asset_type=%s AND canonical_key=%s AND NOT is_active",
+                    "SELECT asset_id::text FROM context_asset WHERE domain_id=%s AND asset_type=%s AND canonical_key=%s AND NOT is_active",
                     (
-                        str(workspace_uuid),
+                        str(domain_id),
                         p.reviewed_payload.asset_type,
                         p.reviewed_payload.canonical_key,
                     ),
@@ -74,7 +74,7 @@ class PackageBuilder:
             asset = GovernedAsset(
                 asset_id=asset_id,
                 asset_revision_id=uuid4(),
-                workspace_uuid=workspace_uuid,
+                domain_id=domain_id,
                 revision_no=revision_no,
                 payload=p.reviewed_payload,
                 evidence=p.evidence,
@@ -91,22 +91,26 @@ class PackageBuilder:
             return BuildResult(
                 proposal_batch_id=bid, status="BUILD_BLOCKED", validation_errors=errors
             )
-        cur.execute("SELECT package_id FROM context_package WHERE workspace_uuid=%s FOR UPDATE", (str(workspace_uuid),))
-        package_id = cur.fetchone()["package_id"]
+        package_id = old.package_id if old else uuid4()
         snapshot = PackageSnapshot(
             package_id=package_id,
-            workspace_uuid=workspace_uuid,
+            domain_id=domain_id,
             package_version_id=uuid4(),
             version=old.version + 1 if old else 1,
             assets=list(effective.values()),
         )
+        if not old:
+            cur.execute(
+                "INSERT INTO context_package(package_id,domain_id,name) SELECT %s,domain_id,name FROM domain WHERE domain_id=%s",
+                (str(package_id), str(domain_id)),
+            )
         for p, a in changed:
             if p.operation == "CREATE":
                 cur.execute(
-                    "INSERT INTO context_asset(asset_id,workspace_uuid,asset_type,canonical_key) VALUES(%s,%s,%s,%s) ON CONFLICT(asset_id) DO UPDATE SET is_active=true,retired_at=NULL",
+                    "INSERT INTO context_asset(asset_id,domain_id,asset_type,canonical_key) VALUES(%s,%s,%s,%s) ON CONFLICT(asset_id) DO UPDATE SET is_active=true,retired_at=NULL",
                     (
                         str(a.asset_id),
-                        str(workspace_uuid),
+                        str(domain_id),
                         a.payload.asset_type,
                         a.payload.canonical_key,
                     ),
@@ -136,11 +140,11 @@ class PackageBuilder:
         for a in snapshot.assets:
             if a.payload.asset_type == "ENTITY":
                 cur.execute(
-                    """INSERT INTO graph_entity(entity_id,workspace_uuid,canonical_key,entity_type,asset_revision_id)
+                    """INSERT INTO graph_entity(entity_id,domain_id,canonical_key,entity_type,asset_revision_id)
                     VALUES(%s,%s,%s,%s,%s) ON CONFLICT(asset_revision_id) DO NOTHING""",
                     (
                         str(uuid4()),
-                        str(workspace_uuid),
+                        str(domain_id),
                         a.payload.canonical_key,
                         a.payload.entity_type,
                         str(a.asset_revision_id),
@@ -154,11 +158,11 @@ class PackageBuilder:
         for a in snapshot.assets:
             if a.payload.asset_type == "RELATIONSHIP":
                 cur.execute(
-                    """INSERT INTO graph_edge(edge_id,workspace_uuid,from_entity_id,to_entity_id,relation_type,asset_revision_id)
+                    """INSERT INTO graph_edge(edge_id,domain_id,from_entity_id,to_entity_id,relation_type,asset_revision_id)
                     VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                     (
                         str(uuid4()),
-                        str(workspace_uuid),
+                        str(domain_id),
                         entity_ids[a.payload.from_entity],
                         entity_ids[a.payload.to_entity],
                         a.payload.relation_type,

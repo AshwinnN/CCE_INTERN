@@ -20,7 +20,7 @@ def response(payload):
 
 
 def candidate():
-    return {'workspace_uuid': str(uuid4()),
+    return {'domain_id': str(uuid4()),
             'payload': {'asset_type': 'GLOSSARY', 'canonical_key': 'inventory',
                         'term': 'Inventory', 'definition': 'Goods available.'},
             'evidence': [{'source_id': str(uuid4()), 'source_item_id': str(uuid4()),

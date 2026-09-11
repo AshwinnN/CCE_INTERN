@@ -7,7 +7,7 @@ import psycopg2
 import pytest
 from cce.context_packages.builder import PackageBuilder
 from cce.persistence.postgres.context_repository import ContextRepository
-from cce.persistence.postgres.workspace_repository import WorkspaceRepository
+from cce.persistence.postgres.domain_repository import DomainRepository
 from cce.persistence.postgres.governance_repository import GovernanceRepository
 from cce.persistence.postgres.ingestion_repository import IngestionRepository
 from cce.persistence.postgres.job_repository import JobRepository
@@ -51,7 +51,7 @@ def system():
         db=db,
         context=context,
         traces=traces,
-        workspaces=WorkspaceRepository(db),
+        domains=DomainRepository(db),
         ingestion=IngestionRepository(db),
         jobs=JobRepository(db, 120),
     )

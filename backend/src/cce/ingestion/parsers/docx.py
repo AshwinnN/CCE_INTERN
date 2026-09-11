@@ -1,4 +1,3 @@
-import re
 from importlib import metadata as package_metadata
 from typing import BinaryIO, Union
 
@@ -30,8 +29,6 @@ class DocxParser(DocumentParser):
             document = Document(file_stream_or_path)
             elements = []
             order = 0
-            positions = {node: i for i, node in enumerate(document.element.body)}
-            element_positions = {}
 
             for paragraph_index, paragraph in enumerate(document.paragraphs):
                 text = paragraph.text.strip()
@@ -39,7 +36,6 @@ class DocxParser(DocumentParser):
                     continue
 
                 style_name = paragraph.style.name if paragraph.style else ""
-                element_positions[f"{metadata.document_id}_elem_{order}"] = positions[paragraph._p]
                 elements.append(
                     TextElement(
                         id=f"{metadata.document_id}_elem_{order}",
@@ -50,7 +46,6 @@ class DocxParser(DocumentParser):
                         metadata={
                             "paragraph_index": paragraph_index,
                             "style": style_name,
-                            "heading_level": int(re.search(r"\d+", style_name).group()) if re.search(r"\d+", style_name) and style_name.lower().startswith("heading") else None,
                         },
                     )
                 )
@@ -72,7 +67,6 @@ class DocxParser(DocumentParser):
                         )
 
                 if rows and cols:
-                    element_positions[f"{metadata.document_id}_elem_{order}"] = positions[table._tbl]
                     elements.append(
                         TableElement(
                             id=f"{metadata.document_id}_elem_{order}",
@@ -85,10 +79,6 @@ class DocxParser(DocumentParser):
                         )
                     )
                     order += 1
-
-            elements.sort(key=lambda element: element_positions[element.id])
-            for position, element in enumerate(elements):
-                element.order = position
 
             if not elements:
                 return ProcessingResult(

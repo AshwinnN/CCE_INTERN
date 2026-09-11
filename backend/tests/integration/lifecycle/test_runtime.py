@@ -4,12 +4,13 @@ from uuid import uuid4
 
 import pytest
 from cce.config.settings import Settings
-from cce.governance.models import WorkspaceCreate
-from cce.runtime.compound import CompoundQuery, NoActivePackage
+from cce.governance.models import DomainCreate
 from cce.runtime.models import (
     AnswerRequest,
     AnswerResult,
     ColumnSchema,
+    DomainCandidate,
+    DomainCandidates,
     ProofResult,
     QueryIntent,
     QueryRequest,
@@ -19,7 +20,6 @@ from cce.runtime.models import (
     SQLErrorRequest,
     SQLGenerationRequest,
     TableSchema,
-    WorkspaceInfo,
 )
 from cce.runtime.orchestrator import RuntimeOrchestrator
 from cce.runtime.sql_guard import guard_query
@@ -28,8 +28,8 @@ from test_lifecycle import ADMIN, approve_all, candidate, finish, setup_source, 
 
 
 class LLM:
-    def __init__(self, workspace, barrier=None):
-        self.workspace = workspace
+    def __init__(self, domain, barrier=None):
+        self.domain = domain
         self.requests = []
         self.barrier = barrier
 
@@ -40,6 +40,16 @@ class LLM:
         self.requests.append(request)
         if output is QueryIntent:
             return QueryIntent(intent="definition", needs_live_data=False)
+        if output is DomainCandidates:
+            return DomainCandidates(
+                candidates=[
+                    DomainCandidate(
+                        domain_id=self.domain.domain_id,
+                        confidence=0.9,
+                        rationale="fixture",
+                    )
+                ]
+            )
         if output is AnswerResult:
             if self.barrier:
                 self.barrier.wait(timeout=3)
@@ -102,36 +112,28 @@ class Executor:
         return [{"VALUE": 82}]
 
 
-def test_parallel_runtime_governance_filter_workspace_failures_and_traces(system):
+def test_parallel_runtime_governance_filter_domain_failures_and_traces(system):
     s = system
-    workspace, source = setup_source(s)
+    domain, source = setup_source(s)
     run, job, items = start(s, source)
-    c = candidate(workspace, items[0], run)
+    c = candidate(domain, items[0], run)
     finish(s, job, items, [[c]])
-    batch = s.governance.promote(run.ingestion_run_id, workspace.workspace_uuid)
+    batch = s.governance.promote(run.ingestion_run_id, domain.domain_id)
     approve_all(s, batch)
-    package = s.context.active(workspace.workspace_uuid)
-    winfo = WorkspaceInfo(
-        workspace_uuid=workspace.workspace_uuid,
-        workspace_id=workspace.workspace_id,
-        name=workspace.name,
-    )
     hit = {
         "memory_id": c.evidence[0].agentic_memory_id,
         "score": 0.95,
         "chunk_text": "Source passage supporting a policy answer",
-        "metadata": {"source_id": str(source), "workspace_uuid": str(workspace.workspace_uuid)},
+        "metadata": {"source_id": str(source), "domain_id": str(domain.domain_id)},
     }
     index = Index([hit])
-    llm = LLM(workspace, Barrier(2))
+    llm = LLM(domain, Barrier(2))
     settings = Settings()
     runtime = RuntimeOrchestrator(
-        settings, llm, s.workspaces, s.context, s.traces, index, None
+        settings, llm, s.domains, s.context, s.traces, index, None
     )
     response = runtime.run(
-        QueryRequest(question="Define term", workspace_id=workspace.workspace_id),
-        winfo,
-        package,
+        QueryRequest(question="Define term", domain_id=domain.domain_id)
     )
     assert (
         response.context_on.status == "SUCCESS"
@@ -152,42 +154,34 @@ def test_parallel_runtime_governance_filter_workspace_failures_and_traces(system
             (str(response.trace_id),),
         )
         assert cur.fetchone()["status"] == "SUCCESS"
-    # Source passages need not have an approved asset. Workspace and score gates remain.
+    # Source passages need not have an approved asset. Domain and score gates remain.
     llm.barrier = None
     index.hits = [{**hit, 'memory_id': 'unapproved-memory'}]
-    request = QueryRequest(question='Define term', workspace_id=workspace.workspace_id)
-    assert runtime.run(request, winfo, package).context_on.status == 'SUCCESS'
-    for bad in ({**hit, 'metadata': {**hit['metadata'], 'workspace_uuid': str(uuid4())}}, {**hit, "score": 0.1}):
+    assert runtime.run(QueryRequest(question='Define term')).context_on.status == 'SUCCESS'
+    for bad in ({**hit, 'metadata': {**hit['metadata'], 'domain_id': str(uuid4())}}, {**hit, "score": 0.1}):
         index.hits = [bad]
-        response = runtime.run(request, winfo, package)
+        response = runtime.run(QueryRequest(question="Define term"))
         assert (
             response.context_on.status == "INSUFFICIENT_CONTEXT"
             and response.context_off.status == "SUCCESS"
         )
         assert response.proof.classification == "NOT_COMPARABLE"
-
-
-def test_compound_query_rejects_missing_package_and_unknown_workspace(system):
-    s = system
-    workspace, _source = setup_source(s)
-
-    class Runtime:
-        traces = s.traces
-
-    class Feedback:
-        def retrieve(self, workspace_uuid, question):
-            return []
-
-    compound = CompoundQuery(Runtime(), s.workspaces, s.context, Feedback())
-    with pytest.raises(NoActivePackage):
-        compound.run(QueryRequest(question="Define term", workspace_id=workspace.workspace_id))
-    with pytest.raises(KeyError):
-        compound.run(QueryRequest(question="Define term", workspace_id="missing_workspace"))
+    other = s.domains.create(DomainCreate(name="No package"), ADMIN)
+    response = runtime.run(
+        QueryRequest(question="Define term", domain_id=other.domain_id)
+    )
+    assert (
+        response.context_on.status == "INSUFFICIENT_CONTEXT"
+        and response.context_off.status == "SUCCESS"
+    )
+    response = runtime.run(QueryRequest(question="Define term", domain_id=uuid4()))
+    assert response.domain.status == "DOMAIN_UNRESOLVED"
+    assert response.context_on.status == response.context_off.status == "SKIPPED"
+    assert response.domain.message
 
 
 def test_sql_shared_retry_budget_guard_execution_and_attempt_persistence(system):
     s = system
-    workspace = s.workspaces.create(WorkspaceCreate(name="SQL pipeline test"), ADMIN)
     source = uuid4()
     schema = SourceSchema(
         source_id=source,
@@ -201,9 +195,7 @@ def test_sql_shared_retry_budget_guard_execution_and_attempt_persistence(system)
         ],
     )
     trace = uuid4()
-    s.traces.create_trace(
-        trace, QueryRequest(question="Current value", workspace_id=workspace.workspace_id)
-    )
+    s.traces.create_trace(trace, QueryRequest(question="Current value"))
     llm = SQLLLM(
         [
             "SELECT (",
@@ -232,9 +224,7 @@ def test_sql_shared_retry_budget_guard_execution_and_attempt_persistence(system)
         )
         assert cur.fetchone()["n"] == 3
     trace2 = uuid4()
-    s.traces.create_trace(
-        trace2, QueryRequest(question="Current value", workspace_id=workspace.workspace_id)
-    )
+    s.traces.create_trace(trace2, QueryRequest(question="Current value"))
     llm2 = SQLLLM(["SELECT VALUE FROM METRIC"] * 2)
     result = SQLPipeline(
         replace(Settings(), sql_max_retries=1), llm2, Executor(fail=True), s.traces
@@ -246,9 +236,7 @@ def test_sql_shared_retry_budget_guard_execution_and_attempt_persistence(system)
     assert result.status == "SUCCESS" and len(result.attempts) == 2
     assert result.attempts[0].database_error == "Database execution failure"
     trace3 = uuid4()
-    s.traces.create_trace(
-        trace3, QueryRequest(question="Current value", workspace_id=workspace.workspace_id)
-    )
+    s.traces.create_trace(trace3, QueryRequest(question="Current value"))
     result = SQLPipeline(
         replace(Settings(), sql_max_retries=1),
         SQLLLM(["DROP TABLE METRIC"] * 2),

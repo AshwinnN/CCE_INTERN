@@ -178,14 +178,13 @@ def test_mime_detection_does_not_treat_arbitrary_zip_as_docx(monkeypatch, tmp_pa
     assert detect_mime_type(str(path)) == 'application/zip'
 
 
-def test_pdf_parser_empty_is_unsupported(tmp_path, monkeypatch):
-    monkeypatch.setattr("cce.ingestion.parsers.pdf_text._ocr_pdf_pages", lambda *a, **k: [])
+def test_pdf_parser_empty_is_unsupported(tmp_path):
     pdf_path = tmp_path / "empty.pdf"
     _write_empty_pdf(pdf_path)
 
     result = PdfTextParser().parse(str(pdf_path), _metadata("empty.pdf"))
 
-    assert result.status == ProcessingStatus.FAILED
+    assert result.status == ProcessingStatus.UNSUPPORTED
     assert result.document is None
 
 

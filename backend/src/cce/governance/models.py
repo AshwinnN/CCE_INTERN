@@ -37,21 +37,21 @@ class Actor(Model):
             raise PermissionError(f"{role} role required")
 
 
-class WorkspaceCreate(Model):
+class DomainCreate(Model):
     name: str = Field(min_length=1)
     description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class Workspace(WorkspaceCreate):
-    workspace_uuid: UUID = Field(default_factory=uuid4)
-    workspace_id: str
-    status: str = "ACTIVE"
-    created_by: str
+class Domain(DomainCreate):
+    domain_id: UUID = Field(default_factory=uuid4)
+    enabled: bool = True
     has_active_package: bool = False
 
 
 class Candidate(Model):
-    workspace_uuid: UUID
+    domain_id: UUID
     payload: Asset
     evidence: list[Evidence] = Field(min_length=1)
     operation: ProposalOperation = ProposalOperation.CREATE
@@ -65,7 +65,7 @@ class ExtractionResult(Model):
 class Proposal(Model):
     proposal_id: UUID
     proposal_batch_id: UUID
-    workspace_uuid: UUID
+    domain_id: UUID
     operation: ProposalOperation
     target_asset_id: UUID | None = None
     machine_payload: Asset
@@ -77,7 +77,6 @@ class Proposal(Model):
 
 
 class ReviewRequest(Model):
-    workspace_uuid: UUID
     proposal_id: UUID
     actor: Actor
     payload: Asset | None = None
@@ -86,7 +85,7 @@ class ReviewRequest(Model):
 
 class ProposalFilter(Model):
     status: ProposalStatus | None = None
-    workspace_uuid: UUID
+    domain_id: UUID | None = None
     proposal_batch_id: UUID | None = None
 
 

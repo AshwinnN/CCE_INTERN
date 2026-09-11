@@ -2,7 +2,7 @@
 
 CCE (CoStrategix Context Engine) is a **governed context server**. It owns source registration, ingestion orchestration, governance, context packages, query-time reasoning, guarded structured-data access, traceability, and MCP exposure.
 
-CCE does **not** own the target long-term vector storage, graph storage, graph extraction, or retrieval infrastructure. Those capabilities are consumed through the external **AgenticPlane Python SDK**. For MVP synthetic proof, `cce.integrations.agentic_plane.LocalIndexClient` provides a pgvector-backed local implementation behind the same boundary; it is not a second domain/runtime architecture.
+CCE does **not** own the target long-term vector storage, graph storage, chunking, graph extraction, or retrieval infrastructure. Those capabilities are consumed through the external **AgenticPlane Python SDK**. For MVP synthetic proof, `cce.integrations.agentic_plane.LocalIndexClient` provides a pgvector-backed local implementation behind the same boundary; it is not a second domain/runtime architecture.
 
 ## Architecture rules
 
@@ -71,7 +71,10 @@ CCE-Tool/
 │   │       └── v1/
 │   │           ├── common.proto               # Shared IDs, pagination, actor, provenance and error message types.
 │   │           ├── health.proto               # Liveness/readiness RPC contract.
-│   │           └── workspaces.proto           # Single WorkspaceService action-dispatch RPC: Workspace CRUD, source-types/discover/sources, proposals, package/versions, query, feedback and retrieve.
+│   │           ├── query.proto                # QueryService contract for governed CCE questions.
+│   │           ├── sources.proto              # Source registration, connection testing and ingestion RPC contracts.
+│   │           ├── governance.proto           # Proposal review, approve, reject and lifecycle RPC contracts.
+│   │           └── packages.proto             # Domain package read/version/manage RPC contracts.
 │   │
 │   ├── src/
 │   │   └── cce/
@@ -187,14 +190,14 @@ CCE-Tool/
 │   │       │
 │   │       ├── context_packages/
 │   │       │   ├── __init__.py                 # Context package exports.
-│   │       │   ├── service.py                  # Creates, retrieves and manages the one governed context package per Workspace.
+│   │       │   ├── service.py                  # Creates, retrieves and manages governed domain packages.
 │   │       │   ├── builder.py                  # Builds package versions from approved context assets only.
 │   │       │   ├── versioning.py               # Controls immutable package versions and version bumps.
-│   │       │   ├── inheritance.py              # Unused override-layering placeholder; four-tier Global/Workspace/Region/Account inheritance is explicitly out of scope for this MVP.
+│   │       │   ├── inheritance.py              # Applies Global → Domain → Region → Account overrides.
 │   │       │   ├── validator.py                # Validates package consistency before activation.
 │   │       │   └── models/
 │   │       │       ├── __init__.py             # Package model exports.
-│   │       │       ├── package.py              # Workspace context package identity, scope, status and version metadata.
+│   │       │       ├── package.py              # Domain package identity, scope, status and version metadata.
 │   │       │       ├── glossary.py             # Canonical term, definition, synonyms and citations.
 │   │       │       ├── semantic_mapping.py     # Business concept → physical structured-data mapping.
 │   │       │       ├── policy_rule.py          # Governed business rule, conditions, values and validity window.
@@ -399,7 +402,7 @@ cce_control
 ├── registry      # Sources, source versions, ingestion runs and checkpoints.
 ├── metadata      # Warehouse schemas, tables, columns and samples.
 ├── governance    # Proposals, reviews, approvals, rejections and lifecycle history.
-├── context       # Workspace context packages, glossary, semantic mappings, policy rules and verified SQL.
+├── context       # Domain packages, glossary, semantic mappings, policy rules and verified SQL.
 ├── runtime       # Query runs and structured execution metadata.
 └── audit         # Append-only governance and answer trace events.
 ```
@@ -430,7 +433,7 @@ Source/version tracking                       Embeddings
 Document normalization                        Vector storage/search
 DLP/entitlement enforcement                   Graph extraction
 Governance lifecycle                          Graph storage/search
-Workspace context packages                    Long-term memory infrastructure
+Domain packages                               Long-term memory infrastructure
 Semantic mappings / verified SQL              Retrieval infrastructure
 Query orchestration                           AgenticPlane observability stack
 Entity/business-rule reasoning
@@ -665,7 +668,3 @@ Request
 ```
 
 The exact agent/deterministic split inside this runtime should be designed separately before implementation.
-
-## Implemented evidence boundary update
-
-CCE now owns content-element token chunking and Markdown/metadata rendering in `integrations/agentic_plane/{chunking,rendering}.py`. AgenticPlane continues to own hosted embedding, vector storage and graph infrastructure. Earlier target tables assigning all chunking to AgenticPlane are superseded by this boundary. See the dated evidence update in `IMPLEMENTATION_STATUS.md` for the implemented subset and outstanding workspace/feedback/retry work.

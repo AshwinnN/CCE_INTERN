@@ -10,13 +10,6 @@ class RuntimeRepository:
 
     def schema(self, source_id) -> SourceSchema:
         with self.db.transaction() as cur:
-            cur.execute("SELECT source_type,config,name FROM cce_source WHERE source_id=%s", (str(source_id),))
-            source = cur.fetchone()
-            if source is None:
-                raise KeyError("Source not found")
-            dialect = {"snowflake": "snowflake", "postgresql": "postgres", "sql_server": "tsql", "mysql": "mysql"}.get(source["source_type"])
-            if dialect is None:
-                raise ValueError("Source does not support structured queries")
             cur.execute(
                 """SELECT n.namespace_name,s.schema_name,t.table_name,c.column_name,c.native_data_type
                 FROM cce_namespace n JOIN cce_schema s USING(namespace_id)
@@ -39,47 +32,56 @@ class RuntimeRepository:
                         name=row["column_name"], data_type=row["native_data_type"]
                     )
                 )
-            selection = (source["config"] or {}).get("schema_selection")
-            selected = list(tables.values())
-            if selection and selection["mode"] == "selected":
-                selected = [table for table in selected if table.schema_name in selection["schemas"]]
-            return SourceSchema(source_id=source_id, source_name=source["name"], dialect=dialect, tables=selected)
+            return SourceSchema(source_id=source_id, tables=list(tables.values()))
 
-    def workspace_schemas(self, workspace_uuid) -> list[SourceSchema]:
+    def domain_schemas(self, domain_id) -> list[SourceSchema]:
         with self.db.transaction() as cur:
             cur.execute(
-                """SELECT s.source_id::text FROM cce_source s
-                WHERE s.workspace_uuid=%s AND s.kind='structured' AND s.enabled AND s.archived_at IS NULL""",
-                (str(workspace_uuid),),
+                """SELECT s.source_id::text FROM cce_source s JOIN source_domain d USING(source_id)
+                WHERE d.domain_id=%s AND s.kind='structured' AND s.enabled""",
+                (str(domain_id),),
             )
             ids = [r["source_id"] for r in cur.fetchall()]
         return [self.schema(i) for i in ids]
 
-    def workspace_source_ids(self, workspace_uuid) -> list[str]:
-        """Registered, enabled sources detected for the selected workspace."""
+    def domain_source_ids(self, domain_id) -> list[str]:
+        """Registered, enabled sources detected for the selected domain."""
         with self.db.transaction() as cur:
             cur.execute(
-                "SELECT s.source_id::text FROM cce_source s WHERE s.workspace_uuid=%s AND s.enabled AND s.archived_at IS NULL",
-                (str(workspace_uuid),),
+                "SELECT s.source_id::text FROM cce_source s JOIN source_domain d USING(source_id) WHERE d.domain_id=%s AND s.enabled",
+                (str(domain_id),),
             )
             return [r['source_id'] for r in cur.fetchall()]
 
     def create_trace(self, trace_id, request):
         with self.db.transaction() as cur:
-            cur.execute("INSERT INTO query_trace(trace_id,question,actor_id,workspace_uuid,parent_trace_id,status) SELECT %s,%s,%s,workspace_uuid,%s,'RUNNING' FROM workspace WHERE workspace_id=%s AND status='ACTIVE'",
-                        (str(trace_id),request.question,request.actor_id,request.metadata.get('parent_trace_id'),request.workspace_id))
-            if cur.rowcount != 1: raise KeyError('Workspace not found')
+            cur.execute(
+                "INSERT INTO query_trace(trace_id,question,actor_id,status) VALUES(%s,%s,%s,'RUNNING')",
+                (str(trace_id), request.question, request.actor_id),
+            )
 
     def finish_trace(self, response):
         with self.db.transaction() as cur:
-            status=response.status if hasattr(response,'status') else response.context_on.status
-            package=response.package if isinstance(response.package,dict) else response.package.model_dump(mode='json')
-            cur.execute("UPDATE query_trace SET package_version_id=%s,status=%s,response=%s,finished_at=now() WHERE trace_id=%s AND workspace_uuid=%s",
-                        (package.get('package_version_id'),status,json_param(response),str(response.trace_id),str(response.workspace.workspace_uuid)))
-
-    def fail_trace(self, trace_id, error):
-        with self.db.transaction() as cur:
-            cur.execute("UPDATE query_trace SET status='FAILED',errors=%s,finished_at=now() WHERE trace_id=%s",(json_param([{'message':str(error)}]),str(trace_id)))
+            cur.execute(
+                """UPDATE query_trace SET domain_id=%s,package_version_id=%s,status=%s,context_on=%s,context_off=%s,proof=%s,errors=%s,finished_at=now()
+                WHERE trace_id=%s""",
+                (
+                    str(response.domain.domain_id)
+                    if response.domain.domain_id
+                    else None,
+                    str(response.package.package_version_id)
+                    if response.package.package_version_id
+                    else None,
+                    "SUCCESS"
+                    if response.context_on.status == "SUCCESS"
+                    else response.context_on.status,
+                    json_param(response.context_on),
+                    json_param(response.context_off),
+                    json_param(response.proof),
+                    json_param([e.model_dump() for e in response.errors]),
+                    str(response.trace_id),
+                ),
+            )
 
     def attempt(self, trace_id, branch, attempt):
         with self.db.transaction() as cur:

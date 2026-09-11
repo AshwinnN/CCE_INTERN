@@ -21,12 +21,6 @@ logger = logging.getLogger(__name__)
 class PdfTextParser(DocumentParser):
     """Extract deterministic semantic text blocks from PDFs."""
 
-    def __init__(self, *, ocr_pages=None, native_min_chars=None):
-        self._ocr_pages = ocr_pages or _ocr_pdf_pages
-        self._native_min_chars = int(os.environ.get("CCE_PDF_NATIVE_MIN_CHARS", "20")) if native_min_chars is None else native_min_chars
-        if self._native_min_chars < 1:
-            raise ValueError("PDF native text threshold must be positive")
-
     def parse(self, file_stream_or_path: Union[str, BinaryIO], metadata: DocumentMetadata) -> ProcessingResult:
         if not isinstance(file_stream_or_path, str):
             return ProcessingResult(
@@ -52,16 +46,6 @@ class PdfTextParser(DocumentParser):
                         textpage.close()
                         page.close()
 
-                    if sum(ch.isalnum() for ch in text) < self._native_min_chars:
-                        ocr_elements = self._ocr_pages(pdf, metadata, page_indices=[page_index])
-                        if not ocr_elements:
-                            raise ValueError(f"No usable native or OCR text on PDF page {page_index + 1}")
-                        for offset, element in enumerate(ocr_elements):
-                            element.order = order + offset
-                        elements.extend(ocr_elements)
-                        order += len(ocr_elements)
-                        continue
-
                     for block in _split_text_blocks(text):
                         element_type = _classify_text_block(block)
                         elements.append(TextElement(
@@ -73,6 +57,8 @@ class PdfTextParser(DocumentParser):
                         ))
                         order += 1
 
+                if not elements:
+                    elements = _ocr_pdf_pages(pdf, metadata)
             finally:
                 pdf.close()
             document = CanonicalDocument(metadata=metadata, elements=elements)
@@ -135,29 +121,29 @@ def _classify_text_block(text: str) -> ElementType:
     return ElementType.PARAGRAPH
 
 
-def _ocr_pdf_pages(pdf, metadata: DocumentMetadata, page_indices=None):
+def _ocr_pdf_pages(pdf, metadata: DocumentMetadata):
     try:
         import numpy as np
         from rapidocr import RapidOCR
+        from rapidocr.utils.typings import EngineType
     except ImportError as exc:
         logger.info("PDF OCR fallback unavailable: %s", exc)
         return []
 
-    ocr = RapidOCR()
+    max_pages = int(os.environ.get("CCE_PDF_OCR_MAX_PAGES", "10"))
+    max_elements = int(os.environ.get("CCE_PDF_OCR_MAX_ELEMENTS", "200"))
+    ocr = RapidOCR(params={
+        "Det.engine_type": EngineType.TORCH,
+        "Cls.engine_type": EngineType.TORCH,
+        "Rec.engine_type": EngineType.TORCH,
+    })
     elements = []
     order = 0
-    for page_index in (range(len(pdf)) if page_indices is None else page_indices):
+    for page_index in range(min(len(pdf), max_pages)):
         page = pdf[page_index]
         try:
-            bitmap = page.render(scale=2)
-            try:
-                image = bitmap.to_pil()
-                try:
-                    result = ocr(np.array(image))
-                finally:
-                    image.close()
-            finally:
-                bitmap.close()
+            image = page.render(scale=2).to_pil()
+            result = ocr(np.array(image))
         finally:
             page.close()
 
@@ -178,14 +164,15 @@ def _ocr_pdf_pages(pdf, metadata: DocumentMetadata, page_indices=None):
                     y1=float(max(pt[1] for pt in box)),
                 )
             elements.append(TextElement(
-                id="%s_page_%d_ocr_%d" % (metadata.document_id, page_index + 1, order),
+                id="%s_ocr_%d" % (metadata.document_id, order),
                 type=ElementType.TEXT,
                 text=str(text),
                 order=order,
                 page_number=page_index + 1,
                 bbox=bbox,
                 confidence=float(scores[idx]) if idx < len(scores) else None,
-                metadata={"extraction_method": "rapidocr", "bbox_coordinate_system": "rendered_pixels", "render_scale": 2},
             ))
             order += 1
+            if order >= max_elements:
+                return elements
     return elements

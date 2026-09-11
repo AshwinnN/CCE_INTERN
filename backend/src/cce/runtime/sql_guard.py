@@ -112,7 +112,7 @@ def guard_query(
     if schema:
         validate_scope(tree, schema)
     # Outer limit caps UNION as well as ordinary queries, independent of model text.
-    return exp.select("*").from_(tree.subquery("cce_bounded_result")).limit(int(max_rows)).sql(dialect=dialect)
+    return f"SELECT * FROM ({tree.sql(dialect=dialect)}) AS cce_bounded_result LIMIT {int(max_rows)}"
 
 
 def enforce_select_only(sql: str) -> None:

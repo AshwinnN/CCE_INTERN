@@ -26,32 +26,26 @@ class GroundingAdapter:
         try:
             connector.connect();items=[];config=source.get('config') or {}
             if source['kind']=='structured':
-                if 'schema_selection' in config or source['source_type'] == 'mysql':
-                    from cce.sources.catalog import source_type_definition, selected_schemas
-                    typed = source_type_definition(source['source_type']).validate_config(config)
-                    schemas = selected_schemas(source['source_type'], typed, connector)
-                else:
-                    schemas = [config.get('schema', 'PUBLIC')]
-                for schema in schemas:
-                    if config.get('max_tables'):raise ValueError('Governed ingestion requires a complete configured schema inventory; remove max_tables')
-                    card=connector.get_schema_card(schema)
-                    # The existing deterministic persistence helper keeps one full schema snapshot.
-                    persisted=persist_structured_metadata_node({'kind':'structured','raw_content':card,'adapter':source['source_type'],
-                        'source_id':str(source_id),'schema_database':config.get('database'),
-                        '_metadata_repository':self.sources.metadata_repository,'warnings':[]})
-                    if persisted['warnings']:raise RuntimeError('; '.join(persisted['warnings']))
-                    for table in card.get('tables',[]):
-                        identity=f"{config.get('database','')}.{schema}.{table['name']}"
-                        semantic={k:v for k,v in table.items() if k!='row_count'}
-                        for column in semantic.get('columns',[]):
-                            canonical,details=canonicalize_type(column.get('type',''),source['source_type'])
-                            column['canonical_type']=canonical;column['type_detail']=details
-                        content=json.dumps(semantic,sort_keys=True,default=str)
-                        # Keep the content hash of the source, but persist only redacted sample metadata.
-                        safe=json.loads(redact_text(content))
-                        items.append(SourceItem(source_item_id=uuid4(),source_id=source_id,source_native_id=identity,
-                            canonical_uri=source['source_type']+':'+identity,content_hash=hashlib.sha256(content.encode()).hexdigest(),
-                            change_type='NEW',metadata={'schema':schema,'table':safe}))
+                schema=config.get('schema','PUBLIC')
+                if config.get('max_tables'):raise ValueError('Governed ingestion requires a complete configured schema inventory; remove max_tables')
+                card=connector.get_schema_card(schema)
+                # The existing deterministic persistence helper keeps one full schema snapshot.
+                persisted=persist_structured_metadata_node({'kind':'structured','raw_content':card,'adapter':source['adapter'],
+                    'source_id':str(source_id),'schema_database':config.get('database'),
+                    '_metadata_repository':self.sources.metadata_repository,'warnings':[]})
+                if persisted['warnings']:raise RuntimeError('; '.join(persisted['warnings']))
+                for table in card.get('tables',[]):
+                    identity=f"{config.get('database','')}.{schema}.{table['name']}"
+                    semantic={k:v for k,v in table.items() if k!='row_count'}
+                    for column in semantic.get('columns',[]):
+                        canonical,details=canonicalize_type(column.get('type',''),source['adapter'])
+                        column['canonical_type']=canonical;column['type_detail']=details
+                    content=json.dumps(semantic,sort_keys=True,default=str)
+                    # Keep the content hash of the source, but persist only redacted sample metadata.
+                    safe=json.loads(redact_text(content))
+                    items.append(SourceItem(source_item_id=uuid4(),source_id=source_id,source_native_id=identity,
+                        canonical_uri=source['adapter']+':'+identity,content_hash=hashlib.sha256(content.encode()).hexdigest(),
+                        change_type='NEW',metadata={'schema':schema,'table':safe}))
             else:
                 for obj in connector.list_objects(config.get('prefix')).get('objects',[]):
                     error=None
@@ -68,26 +62,26 @@ class GroundingAdapter:
         try:
             connector.connect()
             if source['kind']=='structured':
-                normalized=normalize_to_canonical({'schema':item.metadata['schema'],'tables':[item.metadata['table']]},'structured',source['source_type'])
+                normalized=normalize_to_canonical({'schema':item.metadata['schema'],'tables':[item.metadata['table']]},'structured',source['adapter'])
             else:
                 data=connector.fetch_object(item.source_native_id or item.canonical_uri)
                 if hashlib.sha256(data).hexdigest()!=item.content_hash:raise RuntimeError('Source changed during processing; retry ingestion')
-                suffix=Path(item.metadata.get("object", {}).get("filename") or item.source_native_id or item.canonical_uri).suffix
+                suffix=Path(item.source_native_id or item.canonical_uri).suffix
                 with tempfile.TemporaryDirectory(prefix='cce-ground-') as directory:
                     path=Path(directory)/('document'+suffix);path.write_bytes(data)
                     mime=detect_mime_type(str(path));parser=ParserFactory.get_parser(mime)
                     if parser is None:raise ValueError(f'Unsupported document MIME type: {mime}')
                     parsed=parser.parse(str(path),DocumentMetadata(document_id=item.source_native_id or item.canonical_uri,
-                        source_system=source['source_type'],source_uri=item.canonical_uri,mime_type=mime))
+                        source_system=source['adapter'],source_uri=item.canonical_uri,mime_type=mime))
                     if parsed.status.value!='SUCCESS' or parsed.document is None:
                         raise ValueError('; '.join(parsed.errors or ['Incomplete document extraction']))
                     normalized=normalize_to_canonical(parsed.document.model_dump(mode='json'),'unstructured')
             from cce.ingestion.lifecycle_models import IndexBlock,IndexCell,GroundingPayload
             blocks=[]
             def append_block(element):
-                cells=[IndexCell(**{**c, 'text':redact_text(c.get('text',''))}) for c in element.get('cells',[])]
+                cells=[IndexCell(row=c.get('row',0),col=c.get('col',0),text=redact_text(c.get('text',''))) for c in element.get('cells',[])]
                 block=IndexBlock(id=element['id'],type=element.get('type','text'),text=redact_text(element.get('text','')),cells=cells,
-                    metadata={**element.get('metadata',{}), **{k:element[k] for k in ('page_number','bbox','confidence','parent_id','order') if element.get(k) is not None}})
+                    metadata=element.get('metadata',{}))
                 blocks.append(block)
                 for table in element.get('tables',[]):append_block(table)
             for element in normalized.get('elements',[]):append_block(element)
@@ -95,6 +89,6 @@ class GroundingAdapter:
             if not content:raise ValueError('No normalized text extracted')
             payload=GroundingPayload(document_id=item.source_native_id or item.canonical_uri,source_id=item.source_id,
                 source_ref=item.canonical_uri,object_id=item.source_native_id or item.canonical_uri,revision=item.content_hash,
-                trace_id=run_id,blocks=blocks,metadata=normalized.get("metadata",{}))
+                trace_id=run_id,blocks=blocks)
             return GroundedItem(content=content,payload=payload)
         finally:connector.close()

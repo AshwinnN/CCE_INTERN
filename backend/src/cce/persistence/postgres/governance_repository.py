@@ -37,7 +37,7 @@ class GovernanceRepository:
         return Proposal(
             proposal_id=row["proposal_id"],
             proposal_batch_id=row["proposal_batch_id"],
-            workspace_uuid=row["workspace_uuid"],
+            domain_id=row["domain_id"],
             operation=row["operation"],
             target_asset_id=row["target_asset_id"],
             machine_payload=row["machine_payload"],
@@ -51,14 +51,14 @@ class GovernanceRepository:
     def list(self, filters: ProposalFilter) -> list[Proposal]:
         with self.db.transaction() as cur:
             cur.execute(
-                """SELECT p.*,b.workspace_uuid FROM proposal p JOIN proposal_batch b USING(proposal_batch_id)
-                WHERE (%s IS NULL OR p.status=%s) AND (%s IS NULL OR b.workspace_uuid::text=%s)
+                """SELECT p.*,b.domain_id FROM proposal p JOIN proposal_batch b USING(proposal_batch_id)
+                WHERE (%s IS NULL OR p.status=%s) AND (%s IS NULL OR b.domain_id::text=%s)
                 AND (%s IS NULL OR b.proposal_batch_id::text=%s) ORDER BY p.created_at,p.proposal_id""",
                 (
                     filters.status,
                     filters.status,
-                    str(filters.workspace_uuid) if filters.workspace_uuid else None,
-                    str(filters.workspace_uuid) if filters.workspace_uuid else None,
+                    str(filters.domain_id) if filters.domain_id else None,
+                    str(filters.domain_id) if filters.domain_id else None,
                     str(filters.proposal_batch_id)
                     if filters.proposal_batch_id
                     else None,
@@ -69,11 +69,11 @@ class GovernanceRepository:
             )
             return [self._load(cur, r) for r in cur.fetchall()]
 
-    def get(self, proposal_id, workspace_uuid) -> Proposal:
+    def get(self, proposal_id) -> Proposal:
         with self.db.transaction() as cur:
             cur.execute(
-                "SELECT p.*,b.workspace_uuid FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE proposal_id=%s AND b.workspace_uuid=%s",
-                (str(proposal_id),str(workspace_uuid)),
+                "SELECT p.*,b.domain_id FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE proposal_id=%s",
+                (str(proposal_id),),
             )
             row = cur.fetchone()
             if not row:
@@ -83,20 +83,20 @@ class GovernanceRepository:
     def review(self, request: ReviewRequest, action: str) -> Proposal:
         request.actor.require("STEWARD")
         with self.db.transaction() as cur:
-            # Consistent workspace -> batch -> proposal lock order across build/review/promotion.
+            # Consistent domain -> batch -> proposal lock order across build/review/promotion.
             cur.execute(
-                "SELECT b.workspace_uuid FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE p.proposal_id=%s AND b.workspace_uuid=%s",
-                (str(request.proposal_id),str(request.workspace_uuid)),
+                "SELECT b.domain_id FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE p.proposal_id=%s",
+                (str(request.proposal_id),),
             )
             row = cur.fetchone()
             if not row:
                 raise KeyError("Proposal not found")
             cur.execute(
-                "SELECT workspace_uuid FROM workspace WHERE workspace_uuid=%s FOR UPDATE",
-                (str(row["workspace_uuid"]),),
+                "SELECT domain_id FROM domain WHERE domain_id=%s FOR UPDATE",
+                (str(row["domain_id"]),),
             )
             cur.execute(
-                "SELECT p.*,b.workspace_uuid FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE proposal_id=%s FOR UPDATE OF p,b",
+                "SELECT p.*,b.domain_id FROM proposal p JOIN proposal_batch b USING(proposal_batch_id) WHERE proposal_id=%s FOR UPDATE OF p,b",
                 (str(request.proposal_id),),
             )
             row = cur.fetchone()
@@ -146,35 +146,35 @@ class GovernanceRepository:
                 )
                 batch = cur.fetchone()
                 cur.execute(
-                    "SELECT p.*,%s::uuid workspace_uuid FROM proposal p WHERE proposal_batch_id=%s",
-                    (str(proposal.workspace_uuid), str(proposal.proposal_batch_id)),
+                    "SELECT p.*,%s::uuid domain_id FROM proposal p WHERE proposal_batch_id=%s",
+                    (str(proposal.domain_id), str(proposal.proposal_batch_id)),
                 )
                 proposals = [self._load(cur, r) for r in cur.fetchall()]
                 self.builder.build(batch, proposals, cur)
-        return self.get(request.proposal_id,request.workspace_uuid)
+        return self.get(request.proposal_id)
 
-    def promote(self, run_id, workspace_uuid) -> BuildResult:
+    def promote(self, run_id, domain_id) -> BuildResult:
         with self.db.transaction() as cur:
             cur.execute(
-                "SELECT workspace_uuid FROM workspace WHERE workspace_uuid=%s FOR UPDATE",
-                (str(workspace_uuid),),
+                "SELECT domain_id FROM domain WHERE domain_id=%s FOR UPDATE",
+                (str(domain_id),),
             )
             cur.execute(
                 "SELECT status FROM cce_ingestion_run WHERE run_id=%s FOR SHARE",
                 (str(run_id),),
             )
-            if cur.fetchone()["status"] != "SUCCESS":
-                raise ValueError("Only SUCCESS ingestion can expose proposals")
+            if cur.fetchone()["status"] != "COMPLETE":
+                raise ValueError("Only COMPLETE ingestion can expose proposals")
             cur.execute(
-                "SELECT proposal_batch_id,status,validation_errors FROM proposal_batch WHERE ingestion_run_id=%s AND workspace_uuid=%s",
-                (str(run_id), str(workspace_uuid)),
+                "SELECT proposal_batch_id,status,validation_errors FROM proposal_batch WHERE ingestion_run_id=%s AND domain_id=%s",
+                (str(run_id), str(domain_id)),
             )
             existing = cur.fetchone()
             if existing:
                 return BuildResult.model_validate(dict(existing))
             cur.execute(
-                "SELECT payload FROM candidate_extraction WHERE ingestion_run_id=%s AND workspace_uuid=%s",
-                (str(run_id), str(workspace_uuid)),
+                "SELECT payload FROM candidate_extraction WHERE ingestion_run_id=%s AND domain_id=%s",
+                (str(run_id), str(domain_id)),
             )
             candidates = [
                 Candidate.model_validate(r["payload"]) for r in cur.fetchall()
@@ -182,7 +182,7 @@ class GovernanceRepository:
             grouped = defaultdict(list)
             for c in candidates:
                 grouped[(c.payload.asset_type, c.payload.canonical_key)].append(c)
-            active = self.context.active(workspace_uuid, cur)
+            active = self.context.active(domain_id, cur)
             assets = (
                 {
                     (a.payload.asset_type, a.payload.canonical_key): a
@@ -209,7 +209,7 @@ class GovernanceRepository:
                         ],
                     )
                     candidate = Candidate(
-                        workspace_uuid=workspace_uuid, payload=payload, evidence=evidence
+                        domain_id=domain_id, payload=payload, evidence=evidence
                     )
                     identity = ("AMBIGUITY", payload.canonical_key)
                 else:
@@ -245,8 +245,8 @@ class GovernanceRepository:
             bid = uuid4()
             status = "READY_FOR_REVIEW" if resolved else "NO_CHANGE"
             cur.execute(
-                "INSERT INTO proposal_batch(proposal_batch_id,ingestion_run_id,workspace_uuid,status,proposal_count) VALUES(%s,%s,%s,%s,%s)",
-                (str(bid), str(run_id), str(workspace_uuid), status, len(resolved)),
+                "INSERT INTO proposal_batch(proposal_batch_id,ingestion_run_id,domain_id,status,proposal_count) VALUES(%s,%s,%s,%s,%s)",
+                (str(bid), str(run_id), str(domain_id), status, len(resolved)),
             )
             for c in resolved:
                 pid = uuid4()

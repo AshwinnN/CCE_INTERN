@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package cce.v1;
+
+import "cce/v1/common.proto";
+import "google/protobuf/struct.proto";
+
+service GovernanceService {
+  rpc ListProposals(ListProposalsRequest) returns (ListProposalsResponse);
+  rpc EditProposal(EditProposalRequest) returns (Proposal);
+  rpc GetProposal(GetProposalRequest) returns (Proposal);
+  rpc ApproveProposal(ApproveProposalRequest) returns (Proposal);
+  rpc RejectProposal(RejectProposalRequest) returns (Proposal);
+}
+
+message ListProposalsRequest {
+  string status = 3;
+  string domain_id = 4;
+  string proposal_batch_id = 5;
+  PageRequest page = 1;
+  Actor actor = 2;
+}
+
+message ListProposalsResponse {
+  repeated Proposal proposals = 1;
+  PageResponse page = 2;
+}
+
+message GetProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+}
+
+message ApproveProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+  string comment = 3;
+}
+
+message RejectProposalRequest {
+  string proposal_id = 1;
+  Actor actor = 2;
+  string reason = 3;
+}
+
+message Proposal {
+  string proposal_id = 1;
+  string status = 2;
+  Error error = 3;
+  string asset_type = 4;
+  string payload = 5;
+  repeated Provenance evidence = 6;
+  string proposed_at = 7;
+  string approved_at = 8;
+  string approver = 9;
+  string valid_until = 10;
+  string domain_id = 11;
+  string proposal_batch_id = 12;
+  string operation = 13;
+  optional string target_asset_id = 14;
+  google.protobuf.Struct machine_payload = 15;
+  google.protobuf.Struct reviewed_payload = 16;
+  repeated google.protobuf.Struct evidence_refs = 17;
+  optional string resolved_at = 18;
+  optional string resolved_by = 19;
+}
+
+message EditProposalRequest {
+ string proposal_id = 1;
+ Actor actor = 2;
+ google.protobuf.Struct payload = 3;
+ string comment = 4;
+}

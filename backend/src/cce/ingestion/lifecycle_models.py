@@ -7,14 +7,14 @@ from uuid import UUID
 from pydantic import Field
 
 from cce.context_packages.models.assets import GovernedAsset, Model
-from cce.governance.models import Workspace
-from cce.runtime.models import VectorHit
+from cce.governance.models import Domain
+from cce.runtime.models import DomainCandidate, VectorHit
 
 
 class IngestionRunStatus(str, Enum):
     RUNNING = "RUNNING"
     PARTIAL = "PARTIAL"
-    SUCCESS = "SUCCESS"
+    COMPLETE = "COMPLETE"
     FAILED = "FAILED"
 
 
@@ -30,6 +30,7 @@ class ItemProcessingStatus(str, Enum):
     PROCESSING = "PROCESSING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
+    DOMAIN_UNRESOLVED = "DOMAIN_UNRESOLVED"
 
 
 class SourceItem(Model):
@@ -54,12 +55,19 @@ class IngestionRun(Model):
 class ItemResult(Model):
     item: SourceItem
     status: ItemProcessingStatus
+    domains: list[DomainCandidate] = Field(default_factory=list)
     error: str | None = None
+
+
+class DomainDetectionRequest(Model):
+    source_item: SourceItem
+    content: str
+    domains: list[Domain]
 
 
 class ExtractionRequest(Model):
     source_item: SourceItem
-    workspace_uuid: UUID
+    domain: Domain
     evidence: list[VectorHit]
     active_assets: list[GovernedAsset] = Field(default_factory=list)
 
@@ -75,10 +83,6 @@ class InventoryResult(Model):
 
 
 class IndexCell(Model):
-    row_span: int = 1
-    col_span: int = 1
-    is_header: bool = False
-    bbox: dict[str, Any] | None = None
     row: int
     col: int
     text: str

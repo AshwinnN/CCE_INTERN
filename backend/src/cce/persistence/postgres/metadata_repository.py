@@ -67,25 +67,34 @@ class PostgreSQLMetadataRepository(MetadataRepository):
 
     def ensure_source(self, adapter: str, account_id: str,
                        display_name: Optional[str] = None) -> str:
-        # Sources are always registered as Workspace sources first (see
-        # cce.sources.service.SourceService); anonymous account-name-based
-        # source identity was removed with the Domain-to-Workspace refactor.
-        # Governed ingestion always supplies that registered CCE source UUID.
-        try:
-            registered_id = str(uuid.UUID(str(account_id)))
-        except ValueError:
-            raise ValueError(
-                "ensure_source requires an already Workspace-registered CCE source UUID"
-            ) from None
+        source_id = _stable_uuid("source", adapter, account_id)
         with self._cursor() as cur:
+            # Governed ingestion supplies the registered CCE source UUID here;
+            # legacy callers supply a native account name. Reuse that UUID
+            # instead of registering a second source named after it.
+            try:
+                registered_id = str(uuid.UUID(str(account_id)))
+            except ValueError:
+                registered_id = None
+            if registered_id:
+                cur.execute(
+                    "SELECT source_id FROM cce_source WHERE source_id=%s AND adapter=%s",
+                    (registered_id, adapter),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    return str(existing["source_id"])
             cur.execute(
-                "SELECT source_id FROM cce_source WHERE source_id=%s AND source_type=%s",
-                (registered_id, adapter),
+                """
+                INSERT INTO cce_source (source_id, adapter, account_id, display_name)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (adapter, account_id)
+                DO UPDATE SET display_name = COALESCE(EXCLUDED.display_name, cce_source.display_name)
+                RETURNING source_id
+                """,
+                (source_id, adapter, account_id, display_name),
             )
-            existing = cur.fetchone()
-            if not existing:
-                raise KeyError("Registered source not found")
-            return str(existing["source_id"])
+            return str(cur.fetchone()["source_id"])
 
     def ensure_namespace(self, source_id: str, namespace_name: str, namespace_type: str) -> str:
         namespace_id = _stable_uuid("namespace", source_id, namespace_name)

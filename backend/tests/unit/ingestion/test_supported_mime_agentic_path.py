@@ -108,7 +108,7 @@ def test_every_registered_mime_runs_through_memory_and_graph(
 
     assert success, state["errors"]
     assert len(plane.memory.items) == 1
-    assert plane.memory.items[0]["content"].split("## Content\n", 1)[1].startswith("Grace Hopper")
+    assert plane.memory.items[0]["content"].startswith("Grace Hopper")
     assert plane.memory.items[0]["extract_entities"] is False
     assert plane.graph.extractions == [
         {

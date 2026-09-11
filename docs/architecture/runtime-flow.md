@@ -1,37 +1,26 @@
 # Governed query runtime
 
-`POST /workspaces/{workspace_id}/query` is synchronous. HTTP, gRPC and the MCP Python helper call the same Workspace-scoped `Operations.execute('Query', ...)` boundary and typed `QueryResponse`. There is no domain dropdown, `domain_id`, or domain-routing LLM call; the Workspace is resolved once, directly, from the URL-scoped `workspace_id`.
+`POST /query` is synchronous. HTTP, gRPC and the MCP Python helper call the same `QueryService` and typed `QueryResponse`.
 
 ```mermaid
 flowchart TD
-  A[Create query trace] --> B[Atomize question into 1-10 atomic questions]
-  B --> C[Fan out: one full ON/OFF proof per atomic question]
-  C --> D[Final synthesis from successful Context ON answers]
-  D --> T[Persist final trace]
-```
-
-`CompoundQuery` (`runtime/compound.py`) resolves the Workspace and its active package once; a Workspace with no active approved package version raises `NoActivePackage`, surfaced as a structured `NO_ACTIVE_PACKAGE` 409. A structured LLM call then splits the question into 1-10 standalone atomic questions that each preserve enough context to stand alone (a simple question stays one question); Pydantic enforces the 10-question ceiling and the graph never silently truncates past it. Each atomic question fans out (LangGraph `Send`) to its own complete run of the per-atomic orchestrator graph below, first retrieving Workspace-scoped positive/negative feedback lessons as few-shot guidance. A failed atomic question is reported explicitly; final synthesis is built only from successful Context ON answers and never fabricates a result for a failed one.
-
-Per atomic question, `RuntimeOrchestrator` (`runtime/orchestrator.py`) runs:
-
-```mermaid
-flowchart TD
-  A[Create trace] --> B[Parse question intent]
-  B --> D[Load ACTIVE package]
+  A[Create trace] --> B[Parse question]
+  B --> C[Resolve exactly one existing domain]
+  C --> D[Load ACTIVE package]
   D --> ON[Context ON subgraph]
   D --> OFF[Context OFF subgraph]
   ON --> J[Join and classify proof]
   OFF --> J
-  J --> T[Persist trace]
+  J --> T[Persist final trace]
 ```
 
-Intent classification distinguishes document/policy questions from questions requiring current transactional rows. Policy deadlines and procedures do not require SQL.
+An explicit domain is validated; otherwise a structured LLM chooses an existing domain above the configured threshold. Intent classification distinguishes document/policy questions from questions requiring current transactional rows. Policy deadlines and procedures do not require SQL.
 
-Context ON searches AgenticPlane vector memory and its GraphRAG endpoint concurrently. Vector search is filtered by Workspace and registered source IDs and retains the configured minimum score. Source passages remain in the answer context even if they have no individually approved asset. Graph entities are included only when all their source memories are in the scoped vector results; relationships require both endpoints to be included. Unverifiable graph summaries are excluded. Graph outages produce an explicit warning while vector evidence remains available.
+Context ON searches AgenticPlane vector memory and its GraphRAG endpoint concurrently. Vector search is filtered by domain and registered source IDs and retains the configured minimum score. Source passages remain in the answer context even if they have no individually approved asset. Graph entities are included only when all their source memories are in the scoped vector results; relationships require both endpoints to be included. Unverifiable graph summaries are excluded. Graph outages produce an explicit warning while vector evidence remains available.
 
-The active Workspace package is supplemental context, not a prerequisite or a filter on source facts. Approved assets linked to retrieved memories or their source documents, plus their package-bounded dependency expansion, supplement the raw passages and source-linked graph. No active package is required when scoped source evidence is available. Source instructions are never trusted; precise policy facts come from original passages, with conflicting conditions stated explicitly. Query traces retain a `hybrid_retrieval` record with source passages and graph results; citations include vector memory IDs and source URIs.
+The active domain package is supplemental context, not a prerequisite or a filter on source facts. Approved assets linked to retrieved memories or their source documents, plus their package-bounded dependency expansion, supplement the raw passages and source-linked graph. No active package is required when scoped source evidence is available. Source instructions are never trusted; precise policy facts come from original passages, with conflicting conditions stated explicitly. Query traces retain a `hybrid_retrieval` record with source passages and graph results; citations include vector memory IDs and source URIs.
 
-OFF receives only the question and raw source/schema metadata, never vectors, graph results or package assets. Both branches use the same answer model. A live-data question resolves one structured source among the Workspace's registered structured sources (using relevant mappings when more than one is schema-relevant), then enters the guarded SQL pipeline. A document question goes directly to evidence-based synthesis. No federated joins or additional CCE row-level entitlement engine exists.
+OFF receives only the question and raw source/schema metadata, never vectors, graph results or package assets. Both branches use the same answer model. A live-data question resolves one structured source (using relevant mappings or the domain's registered structured sources), then enters the guarded SQL pipeline. A document question goes directly to evidence-based synthesis. No federated joins or additional CCE row-level entitlement engine exists.
 
 Both branches use `SQLPipeline`, a LangGraph subgraph:
 
@@ -41,20 +30,6 @@ Failures route through `describe_sql_error -> persist_attempt -> regenerate`, wi
 
 The SQL guard uses sqlglot ASTs, permits read-only CTE/SELECT queries, rejects writes/multiple statements/administrative operations/unknown functions, validates physical source scope and column references where resolvable, and imposes an outer result limit. Snowflake execution uses the configured role, a statement timeout and bounded fetch. It does not rely on a text prefix check.
 
-Each atomic response contains Workspace/package resolution, equally shaped ON/OFF results, SQL attempts, citations, context references, warnings, errors and proof; the top-level response additionally carries the synthesized answer and the full list of atomic results. SQL and evidence references are generated by CCE rather than fabricated by the answer model. `CCE_QUERY_INCLUDE_ROWS=false` hides external rows while retaining rows for synthesis and durable trace artifacts. Citations are rendered as human-readable labels (e.g. `File.pdf - p. 4, paragraph 7` for unstructured evidence, `<source name> - DATABASE.SCHEMA.TABLE` for structured/SQL evidence); internal IDs remain in the payload for audit but are never required for the label.
+Responses contain domain/package resolution, equally shaped ON/OFF results, SQL attempts, citations, context references, warnings, errors and proof. SQL and evidence references are generated by CCE rather than fabricated by the answer model. `CCE_QUERY_INCLUDE_ROWS=false` hides external rows while retaining rows for synthesis and durable trace artifacts.
 
 A failed branch remains a structured response with HTTP 200. Request validation/authorization failures use 4xx; infrastructure failures outside branch execution use 5xx and retain a failure trace when PostgreSQL remains available. Proof is NOT_COMPARABLE when either branch lacks a successful answer. Improvement classifications are model interpretations, not measured accuracy or a benchmark lift claim. No hidden model chain-of-thought is requested or persisted.
-
-## Citation coordinate transport
-
-Vector citations now contain a `coordinates` mapping and deterministic `label`.
-Supplied page numbers, section paths, element/chunk IDs, character offsets and OCR
-geometry survive the index metadata boundary. Governed evidence retains these
-fields in its existing metadata JSON. Physical page numbers are never inferred
-for DOCX. Branch citation protobuf Structs preserve the new fields.
-
-Structured SQL scope now carries the registered source dialect: Snowflake,
-PostgreSQL, MySQL or T-SQL. The existing AST guard constructs an outer bounded
-query in that dialect, and connectors enforce driver/session timeout and fetch
-limits. SQL Server uses ODBC query timeout; PostgreSQL uses statement_timeout;
-MySQL uses MAX_EXECUTION_TIME.

@@ -32,7 +32,7 @@ class FakeGraph:
 
     def extract_and_store(self, *, content, agent_id, memory_id):
         self.extractions.append((content, agent_id, memory_id))
-        if content.split("## Content\n")[-1] in self._fail_for:
+        if content in self._fail_for:
             raise RuntimeError("graph extraction failed for %r" % content)
         return SimpleNamespace(
             entities=[SimpleNamespace(entity_id="entity-" + memory_id)],
@@ -132,19 +132,49 @@ def test_index_maps_raw_chunks_and_provenance_and_persists_ids():
             "max_retries": 4,
         }
     ]
-    assert result == {"status": "indexed", "indexed": 1,
-                      "entities_extracted": 1, "relationships_extracted": 1}
-    item = plane.memory.stored_items[0]
-    assert item["content"].startswith("# Evidence")
-    assert "raw block text" in item["content"] and "raw cell text" in item["content"]
-    assert item["metadata"]["document_version"] == "rev-7"
-    assert item["metadata"]["record_type"] == "structured_evidence"
-    assert item["metadata"]["element_id"] == "block-1"
-    assert item["metadata"]["chunk_id"]
-    assert item["memory_type"].value == "semantic"
-    assert item["extract_entities"] is False
-    assert bridge.saved[0]["memory_ids"] == ["memory-0"]
-    assert plane.graph.extractions == [(item["content"], "cce-ingestion", "memory-0")]
+    assert result == {
+        "status": "indexed",
+        "indexed": 2,
+        "entities_extracted": 2,
+        "relationships_extracted": 2,
+    }
+    assert [item["content"] for item in plane.memory.stored_items] == [
+        "raw block text",
+        "raw cell text",
+    ]
+    assert all("embedding" not in item for item in plane.memory.stored_items)
+    assert all(
+        item["memory_type"].value == "semantic" for item in plane.memory.stored_items
+    )
+    assert all(item["extract_entities"] is False for item in plane.memory.stored_items)
+    assert all(item["tags"] == ["ingested"] for item in plane.memory.stored_items)
+
+    block_metadata = plane.memory.stored_items[0]["metadata"]
+    assert block_metadata == {
+        "document_id": "doc-1",
+        "source_id": payload["source_id"],
+        "object_id": "doc-1.csv",
+        "trace_id": payload["trace_id"],
+        "source_ref": "azure://container/doc-1.csv",
+        "revision": "rev-7",
+        "block_id": "block-1",
+        "type": "table",
+    }
+    assert plane.memory.stored_items[1]["metadata"]["row"] == 2
+    assert plane.memory.stored_items[1]["metadata"]["col"] == 3
+    assert bridge.saved == [
+        {
+            "document_id": "doc-1",
+            "memory_ids": ["memory-0", "memory-1"],
+            "agent_id": "cce-ingestion",
+            "source_id": payload["source_id"],
+            "trace_id": payload["trace_id"],
+        }
+    ]
+    assert plane.graph.extractions == [
+        ("raw block text", "cce-ingestion", "memory-0"),
+        ("raw cell text", "cce-ingestion", "memory-1"),
+    ]
 
 
 def test_reindex_and_deleted_payload_delete_each_bridged_memory():
@@ -329,7 +359,7 @@ def test_index_graph_extraction_failure_is_non_fatal_per_chunk():
         "entities_extracted": 1,
         "relationships_extracted": 1,
     }
-    assert [call[0].split("## Content\n")[-1] for call in plane.graph.extractions] == ["bad chunk", "good chunk"]
+    assert [call[0] for call in plane.graph.extractions] == ["bad chunk", "good chunk"]
     assert bridge.saved[0]["memory_ids"] == ["memory-0", "memory-1"]
 
 
@@ -355,7 +385,7 @@ def test_metadata_filter_uses_installed_sdk_search_contract():
         plane_factory=lambda **kwargs: plane,
         bridge_repository=FakeBridge(),
     )
-    scope = {"workspace_uuid": "workspace", "source_id": {"$in": ["source-a", "source-b"]}}
+    scope = {"domain_id": "domain", "source_id": {"$in": ["source-a", "source-b"]}}
     assert client.search("question", limit=30, metadata_filter=scope) == []
     assert MessageToDict(captured[0].metadata_filter) == scope
     assert captured[0].limit == 30

@@ -3,13 +3,9 @@ components:
   composition:
     path: backend/src/cce/bootstrap.py
     owns: [repositories, services, index_provider, model_provider, graphs, job_runner]
-  workspaces:
-    path: backend/src/cce/workspaces/operations.py
-    owns: [workspace_crud, source_type_catalog, source_registration, discovery, shared_http_grpc_dispatch]
-    persistence: backend/src/cce/persistence/postgres/workspace_repository.py
   source_ingestion:
     path: backend/src/cce/ingestion/source_graph.py
-    owns: [inventory_diff, item_fanout, workspace_scoped_extraction, completion_gate]
+    owns: [inventory_diff, item_fanout, domain_detection, scoped_extraction, completion_gate]
     dependencies: [sources, grounding, ingestion_repository, agentic_plane, llm]
   jobs:
     path: backend/src/cce/ingestion/job_runner.py
@@ -21,24 +17,16 @@ components:
   packages:
     path: backend/src/cce/context_packages/builder.py
     owns: [validation, full_snapshot, immutable_revisions, atomic_activation, relational_projection]
-    invariant: one_active_package_per_workspace
   query:
-    path: backend/src/cce/runtime/compound.py
-    owns: [atomization, workspace_and_package_resolution, atomic_fanout, feedback_retrieval, final_synthesis, traces]
-  branch_runtime:
     path: backend/src/cce/runtime/orchestrator.py
-    owns: [intent, active_package, parallel_branches, governed_retrieval, proof, citations]
-  feedback:
-    path: backend/src/cce/runtime/feedback.py
-    owns: [upvote_downvote_persistence, downvote_critique, workspace_scoped_retrieval]
-    persistence: query_feedback (postgres, metadata only); embeddings via index_client (AgenticPlane or LocalIndexClient), never a bespoke pgvector column
+    owns: [intent, domain_routing, active_package, parallel_branches, governed_retrieval, proof, traces]
   sql:
     path: backend/src/cce/runtime/sql_pipeline.py
     owns: [generation, parse, scope_validation, guard, execution, error_analysis, retry_budget]
   adapters:
-    paths: [backend/src/cce/http/app.py, backend/src/cce/rpc/services/workspace_service.py, backend/src/cce/mcp/tools/query.py]
+    paths: [backend/src/cce/http/app.py, backend/src/cce/rpc/services, backend/src/cce/mcp/tools/query.py]
     owns: [transport_mapping]
-  frontend:
-    paths: [frontend]
-    status: workspace_scoped_production_ui
-    owns: [workspace_list_create, source_registration_forms, proposal_review, package_versions, query_and_feedback_ui]
+  frontend_mock:
+    paths: [frontend, backend/api]
+    status: development_only
+    owns: [mock_ui_state]

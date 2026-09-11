@@ -19,19 +19,16 @@ _LIST_PAGE_SIZE = 5000
 
 
 class AzureBlobSource(SourceConnector):
-    def __init__(self, connection_string: str, container_name: str, source_id: str = "azure-blob", *, service_client=None, prefix="", recursive=True, credential=None):
-        if service_client is None and (not connection_string or not connection_string.strip()):
+    def __init__(self, connection_string: str, container_name: str, source_id: str = "azure-blob"):
+        if not connection_string or not connection_string.strip():
             raise ConnectionFailedError("Azure Blob connection string is empty")
         if not container_name or not container_name.strip():
             raise ConnectionFailedError("Azure Blob container name is empty")
         self.source_id = source_id
         self.connection_string = connection_string
         self.container_name = container_name
-        self.prefix = prefix
-        self.recursive = recursive
-        self._credential = credential
         try:
-            self.blob_service_client = service_client if service_client is not None else BlobServiceClient.from_connection_string(connection_string)
+            self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
         except Exception as exc:
             raise ConnectionFailedError(
                 "Azure Blob client initialization failed; verify the configured credential reference"
@@ -65,9 +62,6 @@ class AzureBlobSource(SourceConnector):
         )
 
     def list_objects(self, cursor=None):
-        cursor = self.prefix if cursor is None else cursor
-        if not cursor.startswith(self.prefix):
-            raise PermissionError("Blob prefix is outside the configured source")
         logger.info(
             "Listing blobs: container=%s prefix=%r (page_size=%d)",
             self.container_name, cursor, _LIST_PAGE_SIZE,
@@ -85,7 +79,6 @@ class AzureBlobSource(SourceConnector):
                     "modified_at": getattr(blob, "last_modified", None),
                 }
                 for blob in page
-                if self.recursive or "/" not in blob.name[len(cursor):].lstrip("/")
             ]
             objects.extend(page_objects)
             logger.info(
@@ -97,20 +90,13 @@ class AzureBlobSource(SourceConnector):
         return {"objects": objects, "next_cursor": None}
 
     def fetch_object(self, object_id: str) -> bytes:
-        if not object_id.startswith(self.prefix) or (not self.recursive and "/" in object_id[len(self.prefix):].lstrip("/")):
-            raise PermissionError("Blob is outside the configured source scope")
         logger.info("Fetching blob object_id=%s from container=%s", object_id, self.container_name)
         data = self.container_client.get_blob_client(object_id).download_blob().readall()
         logger.info("Fetched blob object_id=%s: %d bytes", object_id, len(data))
         return data
 
     def close(self) -> None:
-        close = getattr(self.blob_service_client, "close", None)
-        if close is not None:
-            close()
-        if self._credential is not None:
-            credential, self._credential = self._credential, None
-            credential.close()
+        return None
 
     def process_blobs(self, prefix: str = None) -> Iterator[ProcessingResult]:
         blobs = self.container_client.list_blobs(name_starts_with=prefix)

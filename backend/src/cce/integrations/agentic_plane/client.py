@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from cce.integrations.agentic_plane.rendering import render_markdown
 import logging
 from collections.abc import Callable
 from typing import Any
@@ -23,8 +22,6 @@ class AgenticPlaneClient:
         base_url: str,
         api_key: str,
         dsn: str,
-        chunk_target_tokens: int = 1000,
-        chunk_overlap_tokens: int = 125,
         timeout: int = 30,
         max_retries: int = 3,
         agent_id: str = "cce-ingestion",
@@ -39,7 +36,6 @@ class AgenticPlaneClient:
         if not agent_id:
             raise ValueError("AgenticPlane agent ID is required")
 
-        self._chunk_options = dict(target_tokens=chunk_target_tokens, overlap_tokens=chunk_overlap_tokens)
         self._agent_id = agent_id
         self._graph_enabled = graph_enabled
         factory = plane_factory or AgenticPlane
@@ -70,7 +66,7 @@ class AgenticPlaneClient:
             return self.delete(document_id)
 
         source_id = payload["source_id"]
-        chunks = list(payload_chunks(payload, **self._chunk_options))
+        chunks = list(payload_chunks(payload))
         logger.info(
             "AgenticPlane index: document_id=%s source_id=%s agent_id=%s chunked into %d chunks",
             document_id,
@@ -105,7 +101,7 @@ class AgenticPlaneClient:
         items = [
             {
                 "agent_id": self._agent_id,
-                "content": render_markdown(chunk["chunk_text"], {**provenance, **chunk["metadata"]}),
+                "content": chunk["chunk_text"],
                 "memory_type": MemoryType.SEMANTIC,
                 "metadata": {
                     **provenance,

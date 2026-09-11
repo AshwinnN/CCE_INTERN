@@ -1,24 +1,24 @@
 from types import SimpleNamespace
 
 import pytest
-from google.protobuf.json_format import MessageToDict
 from cce.context_packages.models.assets import Entity, Relationship
 from cce.context_packages.service import ContextPackageService
-from cce.gen.cce.v1 import workspaces_pb2
+from cce.gen.cce.v1 import governance_pb2, packages_pb2
 from cce.governance.service import GovernanceService
 from cce.http.app import create_app
-from cce.rpc.services.workspace_service import WorkspaceRPCService
+from cce.rpc.services.governance_service import GovernanceRPCService
+from cce.rpc.services.package_service import PackageRPCService
 from fastapi.testclient import TestClient
 from test_lifecycle import STEWARD, candidate, finish, setup_source, start
 
 
 def test_relational_graph_depth_and_http_grpc_parity(system):
     s = system
-    workspace, source = setup_source(s)
+    domain, source = setup_source(s)
     run, job, items = start(s, source)
     candidates = [
         candidate(
-            workspace,
+            domain,
             items[0],
             run,
             Entity(canonical_key=f"e{i}", name=f"Entity {i}", entity_type="record"),
@@ -27,7 +27,7 @@ def test_relational_graph_depth_and_http_grpc_parity(system):
     ]
     candidates += [
         candidate(
-            workspace,
+            domain,
             items[0],
             run,
             Relationship(
@@ -40,50 +40,46 @@ def test_relational_graph_depth_and_http_grpc_parity(system):
         for i in range(3)
     ]
     finish(s, job, items, [candidates])
-    batch = s.governance.promote(run.ingestion_run_id, workspace.workspace_uuid)
+    batch = s.governance.promote(run.ingestion_run_id, domain.domain_id)
     app = SimpleNamespace(
         governance_service=GovernanceService(s.governance),
         package_service=ContextPackageService(s.context),
-        workspace_repository=s.workspaces,
+        domain_repository=s.domains,
         ready=True,
     )
     client = TestClient(create_app(app))
-    scope = "/workspaces/" + workspace.workspace_id
-    proposals = client.get(scope + "/proposals").json()
+    proposals = client.get(
+        "/proposals", params={"domain_id": str(domain.domain_id)}
+    ).json()["proposals"]
     assert len(proposals) == 7
     assert (
         client.post(
-            scope + "/proposals/" + proposals[0]["proposal_id"] + "/approve",
+            "/proposals/" + proposals[0]["proposal_id"] + "/approve",
             json={"actor": {"actor_id": "reader", "roles": ["QUERY_CONSUMER"]}},
         ).status_code
         == 403
     )
-    rpc = WorkspaceRPCService(app)
+    rpc = GovernanceRPCService(app)
     grpc_list = rpc.ListProposals(
-        workspaces_pb2.WorkspaceRequest(workspace_id=workspace.workspace_id), None
+        governance_pb2.ListProposalsRequest(domain_id=str(domain.domain_id)), None
     )
-    grpc_proposals = MessageToDict(grpc_list.data)
-    assert len(grpc_proposals) == 7 and grpc_proposals[0]["reviewed_payload"]
+    assert len(grpc_list.proposals) == 7 and grpc_list.proposals[0].reviewed_payload
     for p in proposals:
         response = client.post(
-            scope + "/proposals/" + p["proposal_id"] + "/approve",
+            "/proposals/" + p["proposal_id"] + "/approve",
             json={"actor": STEWARD.model_dump()},
         )
         assert response.status_code == 200, response.text
-    package = s.context.active(workspace.workspace_uuid)
+    package = s.context.active(domain.domain_id)
     seed = next(a for a in package.assets if a.payload.canonical_key == "e0")
     expanded = s.context.expand(package, [seed], 2)
     assert {
         a.payload.canonical_key for a in expanded if a.payload.asset_type == "ENTITY"
     } == {"e0", "e1", "e2"}
-    grpc_version = rpc.GetVersion(
-        workspaces_pb2.WorkspaceRequest(workspace_id=workspace.workspace_id, resource_id="1"),
-        None,
+    proto = PackageRPCService(app).GetActivePackage(
+        packages_pb2.GetActivePackageRequest(domain_id=str(domain.domain_id)), None
     )
-    version_data = MessageToDict(grpc_version.data)
-    assert len(version_data["assets"]) == 7 and version_data["version"] == 1
-    http_version = client.get(scope + "/package/versions/1").json()
-    assert len(http_version["assets"]) == 7 and http_version["version"] == 1
+    assert len(proto.assets) == 7 and proto.snapshot["version"] == 1
     # Resolved proposals and machine payload cannot be mutated, including via DB.
     with pytest.raises(Exception):
         with s.db.transaction() as cur:
@@ -92,7 +88,7 @@ def test_relational_graph_depth_and_http_grpc_parity(system):
 
 def test_lease_expiry_reclaims_same_run_and_fences_old_worker(system):
     s = system
-    workspace, source = setup_source(s)
+    domain, source = setup_source(s)
     run = s.ingestion.create_or_resume(source)
     first = s.jobs.claim()
     with s.db.transaction() as cur:

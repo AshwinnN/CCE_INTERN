@@ -8,8 +8,8 @@ class GovernanceService:
     def list_proposals(self, filters: ProposalFilter | None = None):
         return self.repository.list(filters or ProposalFilter())
 
-    def get_proposal(self, proposal_id, workspace_uuid):
-        return self.repository.get(proposal_id,workspace_uuid)
+    def get_proposal(self, proposal_id):
+        return self.repository.get(proposal_id)
 
     def edit_proposal(self, request: ReviewRequest):
         return self.repository.review(request, "EDIT")

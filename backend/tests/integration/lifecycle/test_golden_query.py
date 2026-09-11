@@ -1,8 +1,9 @@
-"""Golden query through real governance, PostgreSQL metadata, SQL graph and compound atomization.
+"""Golden query through real governance, PostgreSQL metadata, SQL graph and transports.
 Provider/model outputs are explicit fixtures; this is not a hosted accuracy benchmark.
 """
 
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import uuid4
 
 from cce.config.settings import Settings
@@ -12,24 +13,20 @@ from cce.context_packages.models.assets import (
     SemanticMapping,
     VerifiedSQL,
 )
-from cce.runtime.compound import CompoundQuery
+from cce.gen.cce.v1 import query_pb2
+from cce.rpc.services.query_service import QueryRPCService
 from cce.runtime.models import (
     AnswerResult,
-    AtomicQuestions,
+    DomainCandidate,
     ProofResult,
     QueryIntent,
-    QueryRequest,
     SQLCandidate,
 )
 from cce.runtime.orchestrator import RuntimeOrchestrator
+from cce.runtime.service import QueryService
 from cce.runtime.sql_pipeline import SQLPipeline
 from test_lifecycle import approve_all, candidate, finish, setup_source, start
 from test_runtime import Executor, Index
-
-
-class NoOpFeedback:
-    def retrieve(self, workspace_uuid, question):
-        return []
 
 
 class GoldenLLM:
@@ -37,8 +34,6 @@ class GoldenLLM:
         return "fixture-shared-answer-model"
 
     def invoke(self, task, instruction, request, output):
-        if output is AtomicQuestions:
-            return AtomicQuestions(questions=[request.question])
         if output is QueryIntent:
             return QueryIntent(intent="SLA compliance", needs_live_data=True)
         if output is SQLCandidate:
@@ -47,7 +42,7 @@ class GoldenLLM:
             return SQLCandidate(
                 sql="SELECT on_time_rate FROM DB.PUBLIC.delivery_performance"
             )
-        if output is AnswerResult and task == "answer":
+        if output is AnswerResult:
             assert request.rows == [{"VALUE": 82}]
             if request.context:
                 rules = [
@@ -62,24 +57,22 @@ class GoldenLLM:
             return AnswerResult(
                 answer="82% is the current performance. The schema alone does not establish an applicable SLA threshold."
             )
-        if output is AnswerResult and task == "synthesis":
-            return AnswerResult(answer=request["successful_on_answers"][0]["answer"])
         if output is ProofResult:
             return ProofResult(
                 classification="DIFFERENT",
                 comparable=True,
                 explanation="Only ON has an approved customer exception. No measured accuracy claim.",
             )
-        raise AssertionError((task, output))
+        raise AssertionError(output)
 
 
 def test_golden_live_query_and_row_visibility(system):
     s = system
-    workspace, source = setup_source(s)
+    domain, source = setup_source(s)
     ns, sc, snapshot, table, col = (uuid4() for _ in range(5))
     with s.db.transaction() as cur:
         cur.execute(
-            "UPDATE cce_source SET kind='structured',source_type='snowflake' WHERE source_id=%s",
+            "UPDATE cce_source SET kind='structured',adapter='snowflake' WHERE source_id=%s",
             (str(source),),
         )
         cur.execute(
@@ -103,7 +96,7 @@ def test_golden_live_query_and_row_visibility(system):
             (str(col), str(snapshot), str(table)),
         )
     run, job, items = start(s, source)
-    glossary = candidate(workspace, items[0], run)
+    glossary = candidate(domain, items[0], run)
     glossary.payload.dependencies = ["customer", "mapping", "rule", "sql"]
     payloads = [
         Entity(canonical_key="customer", name="Customer ABC", entity_type="customer"),
@@ -129,11 +122,21 @@ def test_golden_live_query_and_row_visibility(system):
             description="Analyst example",
         ),
     ]
-    candidates = [glossary] + [candidate(workspace, items[0], run, p) for p in payloads]
+    candidates = [glossary] + [candidate(domain, items[0], run, p) for p in payloads]
+    s.ingestion.detections(
+        job,
+        items[0],
+        [
+            DomainCandidate(
+                domain_id=domain.domain_id, confidence=0.9, rationale="Fixture domain"
+            )
+        ],
+        {domain.domain_id},
+    )
     finish(s, job, items, [candidates])
-    batch = s.governance.promote(run.ingestion_run_id, workspace.workspace_uuid)
+    batch = s.governance.promote(run.ingestion_run_id, domain.domain_id)
     approve_all(s, batch)
-    package = s.context.active(workspace.workspace_uuid)
+    package = s.context.active(domain.domain_id)
     assert package and len(package.assets) == 5
     index = Index(
         [
@@ -142,7 +145,7 @@ def test_golden_live_query_and_row_visibility(system):
                 "score": 0.95,
                 "chunk_text": "untrusted retrieval content",
                 "metadata": {
-                    "workspace_uuid": str(workspace.workspace_uuid),
+                    "domain_id": str(domain.domain_id),
                     "source_id": str(source),
                 },
             }
@@ -153,34 +156,24 @@ def test_golden_live_query_and_row_visibility(system):
     executor = Executor()
     sql = SQLPipeline(settings, llm, executor, s.traces)
     runtime = RuntimeOrchestrator(
-        settings, llm, s.workspaces, s.context, s.traces, index, sql
+        settings, llm, s.domains, s.context, s.traces, index, sql
     )
-    compound = CompoundQuery(runtime, s.workspaces, s.context, NoOpFeedback())
-    response = compound.run(
-        QueryRequest(
-            question="Is Customer ABC meeting its delivery SLA?",
-            workspace_id=workspace.workspace_id,
-        )
+    request = query_pb2.QueryRequest(
+        question="Is Customer ABC meeting its delivery SLA?",
+        domain_id=str(domain.domain_id),
     )
-    assert response.status == "SUCCESS"
-    atomic = response.atomic_results[0]
-    assert atomic.context_on.status == atomic.context_off.status == "SUCCESS"
-    assert atomic.context_on.answer.startswith("YES")
-    assert atomic.context_off.answer.startswith("82%")
-    assert not atomic.context_on.rows and not atomic.context_off.rows
+    response = QueryRPCService(
+        SimpleNamespace(query_service=QueryService(runtime))
+    ).Query(request, None)
+    assert response.context_on.status == response.context_off.status == "SUCCESS"
+    assert response.context_on.answer.startswith("YES")
+    assert response.context_off.answer.startswith("82%")
+    assert not response.context_on.rows and not response.context_off.rows
     assert len(executor.calls) == 2
-    assert atomic.context_on.sql_attempts and atomic.context_on.citations
-    assert atomic.proof.classification == "DIFFERENT"
-    assert response.answer.startswith("YES")
+    assert response.context_on.sql_attempts and response.context_on.citations
+    assert response.proof.classification == "DIFFERENT"
     with s.db.transaction() as cur:
         cur.execute(
-            "SELECT status FROM query_trace WHERE trace_id=%s", (str(response.trace_id),)
+            "SELECT context_on FROM query_trace WHERE trace_id=%s", (response.trace_id,)
         )
-        assert cur.fetchone()["status"] == "SUCCESS"
-        # The API response hides rows (query_include_rows=False); the persisted
-        # atomic-branch trace still records the real rows for audit purposes.
-        cur.execute(
-            "SELECT response FROM query_trace WHERE trace_id=%s", (str(atomic.trace_id),)
-        )
-        stored = cur.fetchone()["response"]
-        assert stored["context_on"]["rows"] == [{"VALUE": 82}]
+        assert cur.fetchone()["context_on"]["rows"] == [{"VALUE": 82}]
