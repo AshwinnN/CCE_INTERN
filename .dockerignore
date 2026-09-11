@@ -1,0 +1,12 @@
+.git
+.env
+backend/.env
+frontend/.env
+**/node_modules
+frontend/dist
+**/__pycache__
+**/*.pyc
+.venv
+.ingestion_checkpoints
+logs
+backups

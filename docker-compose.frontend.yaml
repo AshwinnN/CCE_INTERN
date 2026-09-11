@@ -1,0 +1,15 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.frontend
+    image: ${CCE_FRONTEND_IMAGE:-cce-frontend:local}
+    environment:
+      # Use backend:8080 when both services share a Compose network. For AKS,
+      # set this to the Kubernetes backend Service DNS name (for example,
+      # cce-backend:8080).
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-host.docker.internal:8080}
+    ports:
+      - "${FRONTEND_PORT:-8088}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
